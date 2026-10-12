@@ -4,8 +4,11 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"testing"
 )
 
@@ -18,8 +21,16 @@ func TestArchiveRoundTrip(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, ".secret"), []byte("fixture"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	linkCreated := true
 	if err := os.Symlink(".secret", filepath.Join(source, "link")); err != nil {
-		t.Fatal(err)
+		// Windows hosts without Developer Mode may reject symlinks with error 1314.
+		// Keep verifying files and directories while omitting only the unavailable link assertion.
+		missingPrivilege := runtime.GOOS == "windows" && errors.Is(err, syscall.Errno(1314))
+		if !missingPrivilege {
+			t.Fatal(err)
+		}
+		linkCreated = false
+		t.Log("Windows symlink privilege is unavailable; regular file checks remain enabled")
 	}
 	bundle, err := Snapshot([]Root{{Name: "codex", Path: source}})
 	if err != nil {
@@ -34,12 +45,18 @@ func TestArchiveRoundTrip(t *testing.T) {
 	if err != nil || string(got) != "fixture" {
 		t.Fatalf("content: %q, %v", got, err)
 	}
-	link, err := os.Readlink(filepath.Join(destination, "codex", "link"))
-	if err != nil || link != ".secret" {
-		t.Fatalf("link: %q, %v", link, err)
+	if linkCreated {
+		link, err := os.Readlink(filepath.Join(destination, "codex", "link"))
+		if err != nil || link != ".secret" {
+			t.Fatalf("link: %q, %v", link, err)
+		}
 	}
 	info, err := os.Stat(filepath.Join(destination, "codex", ".secret"))
-	if err != nil || info.Mode().Perm() != 0600 {
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Unix mode bits are meaningful on POSIX filesystems; Windows permissions use ACLs.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatalf("permissions: %v, %v", info, err)
 	}
 }
