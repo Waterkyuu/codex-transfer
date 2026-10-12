@@ -33,13 +33,20 @@ func Discover(home, codexHome, sqliteHome string, source bool) ([]Root, error) {
 	}
 	switch runtime.GOOS {
 	case "darwin":
-		roots = append(roots,
+		roots = append(
+			roots,
 			Root{Name: "desktop", Path: filepath.Join(home, "Library", "Application Support", "Codex")},
-			Root{Name: "desktop-support", Path: filepath.Join(home, "Library", "Application Support", "com.openai.codex")},
+			Root{
+				Name: "desktop-support",
+				Path: filepath.Join(home, "Library", "Application Support", "com.openai.codex"),
+			},
 			Root{Name: "preferences", Path: filepath.Join(home, "Library", "Preferences", "com.openai.codex.plist")},
 			Root{Name: "desktop-cache", Path: filepath.Join(home, "Library", "Caches", "com.openai.codex")},
 			Root{Name: "desktop-logs", Path: filepath.Join(home, "Library", "Logs", "Codex")},
-			Root{Name: "saved-state", Path: filepath.Join(home, "Library", "Saved Application State", "com.openai.codex.savedState")},
+			Root{
+				Name: "saved-state",
+				Path: filepath.Join(home, "Library", "Saved Application State", "com.openai.codex.savedState"),
+			},
 		)
 	case "linux":
 		config := os.Getenv("XDG_CONFIG_HOME")
@@ -93,6 +100,7 @@ func Discover(home, codexHome, sqliteHome string, source bool) ([]Root, error) {
 // configuredPaths recognizes simple top-level TOML paths and rejects unsupported path syntax.
 func configuredPaths(path string) (map[string]string, error) {
 	result := map[string]string{}
+	// #nosec G304 -- The caller supplies the selected Codex config path; no remote path is accepted here.
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return result, nil
@@ -100,7 +108,7 @@ func configuredPaths(path string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 4096), 1<<20)
 	for scanner.Scan() {
@@ -246,7 +254,7 @@ func CheckStopped() error {
 		knownCLI := base == "codex" || base == "codex.exe" || base == "codex-app-server"
 		knownApp := strings.Contains(line, "/codex.app/") || strings.HasPrefix(line, `"codex.exe"`)
 		if knownCLI || knownApp {
-			return errors.New("Codex is running; quit Codex Desktop, CLI, IDE extensions, and daemon before migration")
+			return errors.New("codex is running; quit Codex Desktop, CLI, IDE extensions, and daemon before migration")
 		}
 	}
 	return nil

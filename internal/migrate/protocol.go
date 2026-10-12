@@ -99,6 +99,7 @@ func writeMessage(connection net.Conn, value message) error {
 		return err
 	}
 	var header [4]byte
+	// #nosec G115 -- len(data) is bounded to maxFrame (1 MiB) before this conversion.
 	binary.BigEndian.PutUint32(header[:], uint32(len(data)))
 	if _, err := io.Copy(connection, bytes.NewReader(header[:])); err != nil {
 		return err

@@ -105,6 +105,9 @@ func SnapshotContext(ctx context.Context, roots []Root) (*Bundle, error) {
 			if !info.Mode().IsRegular() {
 				return nil
 			}
+			// #nosec G304 G122 -- Go 1.22 has no os.Root API; this reads a trusted, user-selected
+			// offline tree. The opened file identity and the complete tree metadata are
+			// checked before the snapshot is eligible for transmission.
 			input, err := os.Open(local)
 			if err != nil {
 				return err
@@ -141,7 +144,8 @@ func SnapshotContext(ctx context.Context, roots []Root) (*Bundle, error) {
 			}
 			after[local] = info
 			old, ok := before[local]
-			if !ok || !os.SameFile(old, info) || old.Size() != info.Size() || old.Mode() != info.Mode() || !old.ModTime().Equal(info.ModTime()) {
+			if !ok || !os.SameFile(old, info) || old.Size() != info.Size() || old.Mode() != info.Mode() ||
+				!old.ModTime().Equal(info.ModTime()) {
 				return fmt.Errorf("source changed during snapshot: %s", local)
 			}
 			return nil
@@ -183,7 +187,11 @@ func (r contextReader) Read(data []byte) (int, error) {
 
 // Extract restores a validated archive into a fresh directory without following archive symlinks.
 func Extract(reader io.Reader, directory string, maxBytes int64) error {
-	return extractInto(reader, func(name string) (string, error) { return filepath.Join(directory, name), nil }, maxBytes)
+	return extractInto(
+		reader,
+		func(name string) (string, error) { return filepath.Join(directory, name), nil },
+		maxBytes,
+	)
 }
 
 // pendingLink delays symlink creation until regular file extraction has finished.
@@ -246,8 +254,9 @@ func extractInto(reader io.Reader, resolve func(string) (string, error), maxByte
 			if err := os.Mkdir(local, 0700); err != nil {
 				return err
 			}
-		case tar.TypeReg, tar.TypeRegA:
-			file, err := os.OpenFile(local, os.O_CREATE|os.O_EXCL|os.O_WRONLY, fs.FileMode(header.Mode)&0700)
+		case tar.TypeReg:
+			// #nosec G304 -- Archive paths and their ancestors have been validated and resolve only into private staging.
+			file, err := os.OpenFile(local, os.O_CREATE|os.O_EXCL|os.O_WRONLY, fs.FileMode(header.Mode&0700))
 			if err != nil {
 				return err
 			}

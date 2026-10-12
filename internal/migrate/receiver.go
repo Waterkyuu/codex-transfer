@@ -68,7 +68,12 @@ func (r *Receiver) Serve(ctx context.Context, listener net.Listener) error {
 	}
 	stop := context.AfterFunc(ctx, func() { _ = listener.Close() })
 	defer stop()
-	fmt.Fprintf(r.Output, "Receiver listening at %s\nCertificate SHA-256: %s\nWaiting for sender...\n", listener.Addr(), r.fingerprint)
+	_, _ = fmt.Fprintf(
+		r.Output,
+		"Receiver listening at %s\nCertificate SHA-256: %s\nWaiting for sender...\n",
+		listener.Addr(),
+		r.fingerprint,
+	)
 	for {
 		raw, err := listener.Accept()
 		if err != nil {
@@ -77,7 +82,10 @@ func (r *Receiver) Serve(ctx context.Context, listener net.Listener) error {
 			}
 			return err
 		}
-		connection := tls.Server(raw, &tls.Config{Certificates: []tls.Certificate{r.certificate}, MinVersion: tls.VersionTLS13})
+		connection := tls.Server(
+			raw,
+			&tls.Config{Certificates: []tls.Certificate{r.certificate}, MinVersion: tls.VersionTLS13},
+		)
 		closeOnCancel := context.AfterFunc(ctx, func() { _ = connection.Close() })
 		handshakeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		err = connection.HandshakeContext(handshakeCtx)
@@ -88,10 +96,10 @@ func (r *Receiver) Serve(ctx context.Context, listener net.Listener) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			fmt.Fprintln(r.Output, "Rejected invalid TLS connection.")
+			_, _ = fmt.Fprintln(r.Output, "Rejected invalid TLS connection.")
 			continue
 		}
-		fmt.Fprintf(r.Output, "Sender connected from %s\n", connection.RemoteAddr())
+		_, _ = fmt.Fprintf(r.Output, "Sender connected from %s\n", connection.RemoteAddr())
 		err = r.receive(ctx, connection)
 		if err != nil {
 			_ = writeMessage(connection, message{Kind: "error", Error: err.Error()})
@@ -135,11 +143,11 @@ func (r *Receiver) receive(ctx context.Context, connection *tls.Conn) error {
 	if err != nil {
 		return err
 	}
-	defer archive.Close()
+	defer func() { _ = archive.Close() }()
 	if err := writeMessage(connection, message{Kind: "ready"}); err != nil {
 		return err
 	}
-	fmt.Fprintln(r.Output, "Both terminals are ready. Receiving encrypted data...")
+	_, _ = fmt.Fprintln(r.Output, "Both terminals are ready. Receiving encrypted data...")
 	p := newProgress(r.Output, hello.Size)
 	hash := sha256.New()
 	_, err = io.CopyN(io.MultiWriter(archive, hash, p), networkReader{connection: connection}, hello.Size)
@@ -153,7 +161,7 @@ func (r *Receiver) receive(ctx context.Context, connection *tls.Conn) error {
 	if _, err := archive.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	fmt.Fprintln(r.Output, "SHA-256 verified. Extracting into private staging directories...")
+	_, _ = fmt.Fprintln(r.Output, "SHA-256 verified. Extracting into private staging directories...")
 	stopKeepalive := keepAlive(connection)
 	err = extractInto(contextReader{ctx: ctx, reader: archive}, installation.resolve, hello.Size)
 	if err == nil && r.Check != nil {
@@ -170,15 +178,15 @@ func (r *Receiver) receive(ctx context.Context, connection *tls.Conn) error {
 		return err
 	}
 	for _, item := range installation.items {
-		fmt.Fprintf(r.Output, "Installed %s: %s\n", item.name, item.target)
+		_, _ = fmt.Fprintf(r.Output, "Installed %s: %s\n", item.name, item.target)
 		if item.backup != "" {
-			fmt.Fprintf(r.Output, "Backup: %s\n", item.backup)
+			_, _ = fmt.Fprintf(r.Output, "Backup: %s\n", item.backup)
 		}
 	}
 	if err := writeMessage(connection, message{Kind: "complete"}); err != nil {
 		return fmt.Errorf("installed successfully but acknowledgement failed: %w", err)
 	}
-	fmt.Fprintln(r.Output, "Migration complete. Restart Codex after checking project paths and authentication.")
+	_, _ = fmt.Fprintln(r.Output, "Migration complete. Restart Codex after checking project paths and authentication.")
 	return nil
 }
 

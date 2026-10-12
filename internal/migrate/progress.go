@@ -69,7 +69,7 @@ func (p *progress) report() {
 // print uses MiB and seconds so network rates are comparable across platforms.
 func (p *progress) print(current int64, rate float64, elapsed time.Duration) {
 	percent := 100 * float64(current) / float64(p.total)
-	fmt.Fprintf(p.output, "%.1f%% | %.2f / %.2f MiB | %.2f MiB/s | %.1fs\n",
+	_, _ = fmt.Fprintf(p.output, "%.1f%% | %.2f / %.2f MiB | %.2f MiB/s | %.1fs\n",
 		percent,
 		float64(current)/(1<<20),
 		float64(p.total)/(1<<20),

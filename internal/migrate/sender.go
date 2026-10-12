@@ -43,18 +43,23 @@ func (s *Sender) Send(ctx context.Context, address string) error {
 			return err
 		}
 	}
-	fmt.Fprintln(s.Output, "Preparing a consistent local snapshot...")
+	_, _ = fmt.Fprintln(s.Output, "Preparing a consistent local snapshot...")
 	bundle, err := SnapshotContext(ctx, s.Roots)
 	if err != nil {
 		return err
 	}
-	defer bundle.Close()
-	fmt.Fprintf(s.Output, "Snapshot: %.2f MiB; skipped runtime sockets: %d\n", float64(bundle.Size)/(1<<20), bundle.Skipped)
+	defer func() { _ = bundle.Close() }()
+	_, _ = fmt.Fprintf(
+		s.Output,
+		"Snapshot: %.2f MiB; skipped runtime sockets: %d\n",
+		float64(bundle.Size)/(1<<20),
+		bundle.Skipped,
+	)
 	connection, err := s.connect(ctx, address)
 	if err != nil {
 		return err
 	}
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 	stop := context.AfterFunc(ctx, func() { _ = connection.Close() })
 	defer stop()
 	if s.Confirm != nil {
@@ -86,14 +91,14 @@ func (s *Sender) Send(ctx context.Context, address string) error {
 	if ready.Kind != "ready" {
 		return errors.New("receiver did not announce readiness")
 	}
-	fmt.Fprintln(s.Output, "Both terminals are ready. Sending encrypted data...")
+	_, _ = fmt.Fprintln(s.Output, "Both terminals are ready. Sending encrypted data...")
 	p := newProgress(s.Output, bundle.Size)
 	_, err = io.Copy(io.MultiWriter(networkWriter{connection: connection}, p), bundle.File)
 	p.stop()
 	if err != nil {
 		return fmt.Errorf("send archive: %w", err)
 	}
-	fmt.Fprintln(s.Output, "Sent. Waiting for receiver verification and installation...")
+	_, _ = fmt.Fprintln(s.Output, "Sent. Waiting for receiver verification and installation...")
 	// Receiver extraction may take longer than a network idle period on a large archive.
 	for {
 		result, err := readMessage(connection)
@@ -108,7 +113,7 @@ func (s *Sender) Send(ctx context.Context, address string) error {
 		}
 		break
 	}
-	fmt.Fprintln(s.Output, "Migration complete. Source data retained; destination backups retained.")
+	_, _ = fmt.Fprintln(s.Output, "Migration complete. Source data retained; destination backups retained.")
 	return nil
 }
 
@@ -127,7 +132,7 @@ func (s *Sender) connect(ctx context.Context, address string) (*tls.Conn, error)
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
-	fmt.Fprintf(s.Output, "Waiting for receiver at %s (limit %s)...\n", address, wait)
+	_, _ = fmt.Fprintf(s.Output, "Waiting for receiver at %s (limit %s)...\n", address, wait)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -135,7 +140,8 @@ func (s *Sender) connect(ctx context.Context, address string) (*tls.Conn, error)
 		if err == nil {
 			config := &tls.Config{
 				MinVersion: tls.VersionTLS13,
-				// Trust is established by a certificate pin or manual TLS exporter comparison.
+				// #nosec G402 -- Ephemeral certificates are verified by a pin or by the CLI
+				// pairing callback before sending the offer or any archive data.
 				InsecureSkipVerify: true,
 				VerifyConnection: func(state tls.ConnectionState) error {
 					if len(state.PeerCertificates) != 1 {
