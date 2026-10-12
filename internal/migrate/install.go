@@ -55,7 +55,10 @@ func prepareInstallation(roots []Root) (*installation, error) {
 			installation.close()
 			return nil, err
 		}
-		installation.items = append(installation.items, &installItem{name: root.Name, target: root.Path, slot: slot, lock: lock})
+		installation.items = append(
+			installation.items,
+			&installItem{name: root.Name, target: root.Path, slot: slot, lock: lock},
+		)
 	}
 	return installation, nil
 }

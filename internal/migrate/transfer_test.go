@@ -36,7 +36,11 @@ func TestTransferEndToEnd(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- receiver.Serve(ctx, listener) }()
-	sender := &Sender{Roots: []Root{{Name: "codex", Path: source}}, Output: io.Discard, Fingerprint: receiver.Fingerprint()}
+	sender := &Sender{
+		Roots:       []Root{{Name: "codex", Path: source}},
+		Output:      io.Discard,
+		Fingerprint: receiver.Fingerprint(),
+	}
 	if err := sender.Send(ctx, listener.Addr().String()); err != nil {
 		t.Fatal(err)
 	}

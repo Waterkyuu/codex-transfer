@@ -111,7 +111,13 @@ func TestCorruptArchive(t *testing.T) {
 	}
 	defer connection.Close()
 	payload := []byte("corrupt synthetic payload")
-	hello := message{Kind: "offer", OS: runtime.GOOS, Roots: []string{"codex"}, Size: int64(len(payload)), SHA256: strings.Repeat("0", 64)}
+	hello := message{
+		Kind:   "offer",
+		OS:     runtime.GOOS,
+		Roots:  []string{"codex"},
+		Size:   int64(len(payload)),
+		SHA256: strings.Repeat("0", 64),
+	}
 	if err := writeMessage(connection, hello); err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +146,13 @@ func TestCorruptArchive(t *testing.T) {
 func TestOfferValidation(t *testing.T) {
 	receiver := &Receiver{Targets: map[string]string{"codex": filepath.Join(t.TempDir(), "codex")}, MaxBytes: 1024}
 	hash := sha256.Sum256([]byte("fixture"))
-	valid := message{Kind: "offer", OS: runtime.GOOS, Roots: []string{"codex"}, Size: 512, SHA256: hex.EncodeToString(hash[:])}
+	valid := message{
+		Kind:   "offer",
+		OS:     runtime.GOOS,
+		Roots:  []string{"codex"},
+		Size:   512,
+		SHA256: hex.EncodeToString(hash[:]),
+	}
 	if _, err := receiver.validateOffer(valid); err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +198,11 @@ func TestInterruptedOffer(t *testing.T) {
 
 // TestReceiverWaitCancellation releases a listening socket when startup is canceled.
 func TestReceiverWaitCancellation(t *testing.T) {
-	receiver := &Receiver{Targets: map[string]string{"codex": filepath.Join(t.TempDir(), "codex")}, Output: io.Discard, MaxBytes: 1024}
+	receiver := &Receiver{
+		Targets:  map[string]string{"codex": filepath.Join(t.TempDir(), "codex")},
+		Output:   io.Discard,
+		MaxBytes: 1024,
+	}
 	if err := receiver.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +235,11 @@ func TestMalformedFrame(t *testing.T) {
 
 // TestTLSMinimum rejects older TLS peers rather than silently downgrading encryption.
 func TestTLSMinimum(t *testing.T) {
-	receiver := &Receiver{Targets: map[string]string{"codex": filepath.Join(t.TempDir(), "codex")}, Output: io.Discard, MaxBytes: 1024}
+	receiver := &Receiver{
+		Targets:  map[string]string{"codex": filepath.Join(t.TempDir(), "codex")},
+		Output:   io.Discard,
+		MaxBytes: 1024,
+	}
 	address, _, _ := startReceiver(t, receiver)
 	connection, err := tls.Dial("tcp", address, &tls.Config{InsecureSkipVerify: true, MaxVersion: tls.VersionTLS12})
 	if err == nil {

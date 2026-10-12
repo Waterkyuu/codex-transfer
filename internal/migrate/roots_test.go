@@ -9,7 +9,9 @@ import (
 // TestValidateRoots rejects overlapping paths that cannot be independently replaced.
 func TestValidateRoots(t *testing.T) {
 	root := t.TempDir()
-	if err := ValidateRoots([]Root{{Name: "codex", Path: root}, {Name: "sqlite", Path: filepath.Join(root, "sqlite")}}); err == nil {
+	if err := ValidateRoots(
+		[]Root{{Name: "codex", Path: root}, {Name: "sqlite", Path: filepath.Join(root, "sqlite")}},
+	); err == nil {
 		t.Fatal("overlapping roots accepted")
 	}
 }
