@@ -7,6 +7,20 @@ import (
 	"testing"
 )
 
+// TestVersionCommand exposes release metadata without inspecting local Codex state.
+func TestVersionCommand(t *testing.T) {
+	for _, command := range []string{"version", "--version"} {
+		var output bytes.Buffer
+		app := &application{input: strings.NewReader(""), output: &output}
+		if err := app.run(context.Background(), []string{command}); err != nil {
+			t.Fatal(err)
+		}
+		if output.String() != "codex-transfer development\n" {
+			t.Fatalf("version: %q", output.String())
+		}
+	}
+}
+
 // TestCLIUsage verifies the discoverable command surface and rejects unknown commands.
 func TestCLIUsage(t *testing.T) {
 	var output bytes.Buffer

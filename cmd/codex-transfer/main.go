@@ -38,6 +38,9 @@ func (a *application) run(ctx context.Context, args []string) error {
 		return nil
 	}
 	switch args[0] {
+	case "version", "--version":
+		fmt.Fprintln(a.output, "codex-transfer", releaseVersion)
+		return nil
 	case "help", "--help", "-h":
 		a.help()
 		return nil
@@ -55,6 +58,7 @@ func (a *application) help() {
 	fmt.Fprint(a.output, `codex-transfer - encrypted local Codex migration
 
 Usage:
+  codex-transfer --version                     Show the installed release version
   codex-transfer address                       Show local IP addresses
   codex-transfer paths [options]               Show data roots included on this computer
   codex-transfer check [options]               Check local Codex shutdown and data paths
