@@ -1,4 +1,4 @@
-package main
+package e2e_test
 
 import (
 	"bufio"
@@ -15,15 +15,15 @@ import (
 	"time"
 )
 
-// TestCLIEndToEnd runs two real binaries with isolated homes and verifies sender-first startup.
-func TestCLIEndToEnd(t *testing.T) {
+// TestCLISenderFirstTransfer runs two real binaries with isolated homes and verifies sender-first startup.
+func TestCLISenderFirstTransfer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	binary := filepath.Join(t.TempDir(), "codex-transfer")
 	if runtime.GOOS == "windows" {
 		binary += ".exe"
 	}
-	build := exec.CommandContext(ctx, "go", "build", "-race", "-o", binary, ".")
+	build := exec.CommandContext(ctx, "go", "build", "-race", "-o", binary, "../cmd")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %s, %v", output, err)
 	}
@@ -33,7 +33,11 @@ func TestCLIEndToEnd(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(source, ".codex", "history.jsonl"), []byte("synthetic history\n"), 0600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(source, ".codex", "history.jsonl"),
+		[]byte("synthetic history\n"),
+		0600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(destination, ".codex", "old"), []byte("old"), 0600); err != nil {
@@ -67,7 +71,16 @@ func TestCLIEndToEnd(t *testing.T) {
 	}
 	waitForLine(t, senderLines, "Waiting for receiver")
 	// Receiver is started only after the source has explicitly entered the waiting state.
-	receiver := exec.CommandContext(ctx, binary, "receive", "--listen", "127.0.0.1", "--port", fmt.Sprint(port), "--skip-process-check")
+	receiver := exec.CommandContext(
+		ctx,
+		binary,
+		"receive",
+		"--listen",
+		"127.0.0.1",
+		"--port",
+		fmt.Sprint(port),
+		"--skip-process-check",
+	)
 	receiver.Env = fixtureEnvironment(destination)
 	receiverInput, err := receiver.StdinPipe()
 	if err != nil {
@@ -116,7 +129,14 @@ func TestCLIEndToEnd(t *testing.T) {
 // fixtureEnvironment isolates all platform data roots so subprocess tests never read real Codex data.
 func fixtureEnvironment(home string) []string {
 	environment := []string{}
-	keys := map[string]bool{"HOME": true, "USERPROFILE": true, "CODEX_HOME": true, "CODEX_SQLITE_HOME": true, "APPDATA": true, "XDG_CONFIG_HOME": true}
+	keys := map[string]bool{
+		"HOME":              true,
+		"USERPROFILE":       true,
+		"CODEX_HOME":        true,
+		"CODEX_SQLITE_HOME": true,
+		"APPDATA":           true,
+		"XDG_CONFIG_HOME":   true,
+	}
 	for _, item := range os.Environ() {
 		key, _, _ := strings.Cut(item, "=")
 		if !keys[key] {

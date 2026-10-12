@@ -54,7 +54,10 @@ reference Task targets that are absent from `Taskfile.yml`.
 
 - Place code in the package that owns the behavior. Do not use an unrelated file
   or a generic utility package merely for convenience.
-- Co-locate `*_test.go` files with the package that owns the behavior.
+- Co-locate unit tests with the package that owns the behavior.
+- Keep subprocess end-to-end tests in the root `e2e` directory with `package e2e_test`.
+  Name files after the tested feature using the `*_e2e_test.go` suffix, such as
+  `transfer_e2e_test.go`.
 - Use file names that explain responsibility, such as `client.go` and `options.go`.
 - Add directories only when they represent an actual owner or responsibility.
 - Do not recreate a second implementation of a moved feature or introduce

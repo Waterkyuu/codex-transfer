@@ -3,7 +3,7 @@ project_name: codex-transfer
 
 builds:
   - id: codex-transfer
-    main: ./cmd/codex-transfer
+    main: ./cmd
     binary: codex-transfer
     env: [CGO_ENABLED=0]
     flags: [-trimpath]
