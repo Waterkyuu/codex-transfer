@@ -1,6 +1,6 @@
 {
   "name": "@waterkyuu/codex-transfer",
-  "version": "0.0.0-development",
+  "version": "0.1.0",
   "description": "Cross-platform installer for the codex-transfer Go CLI",
   "license": "UNLICENSED",
   "repository": { "type": "git", "url": "git+https://github.com/Waterkyuu/codex-transfer.git" },
