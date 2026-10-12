@@ -1,0 +1,38 @@
+version: "3"
+tasks:
+  default:
+    cmds: [task --list]
+  help:
+    cmds: [task --list]
+  fmt:
+    desc: Format Go source
+    cmds:
+      - gofmt -w cmd internal e2e
+      - golangci-lint fmt
+  lint:
+    desc: Check formatting and Go diagnostics
+    cmds:
+      - test -z "$(gofmt -l cmd internal e2e)"
+      - go vet ./...
+      - golangci-lint run --timeout=5m
+  test:
+    desc: Test with race detection
+    cmds: [go test -race ./... -count=1]
+  test-cover:
+    desc: Test with coverage
+    cmds: [go test -race ./... -coverprofile=coverage.out -count=1]
+  build:
+    desc: Build the CLI
+    cmds:
+      - mkdir -p bin
+      - go build -trimpath -o bin/codex-transfer ./cmd
+
+  test-installers:
+    desc: Test npm and native installers (macOS/Linux)
+    cmds:
+      - npm --prefix npm test
+      - sh scripts/install.test.sh
+  release-check:
+    desc: Validate release configuration without publishing
+    cmds:
+      - goreleaser check

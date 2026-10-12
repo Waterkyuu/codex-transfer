@@ -1,0 +1,17 @@
+{
+  "name": "@waterkyuu/codex-transfer",
+  "version": "0.0.0-development",
+  "description": "Cross-platform installer for the codex-transfer Go CLI",
+  "license": "UNLICENSED",
+  "repository": { "type": "git", "url": "git+https://github.com/Waterkyuu/codex-transfer.git" },
+  "homepage": "https://github.com/Waterkyuu/codex-transfer",
+  "type": "module",
+  "bin": { "codex-transfer": "cli.js" },
+  "files": ["cli.js", "install.js", "README.md"],
+  "scripts": {
+    "postinstall": "node install.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=22" },
+  "publishConfig": { "access": "public" }
+}
