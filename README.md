@@ -1,132 +1,165 @@
-# codex-transfer
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/logo-codex-transfer-dark.png" />
+    <img src="./assets/logo-codex-transfer.png" width="520" alt="codex-transfer logo" />
+  </picture>
+  <h1>codex-transfer</h1>
+  <p>Move your local Codex data between computers, directly from the terminal.</p>
+  <p><strong>English</strong> | <a href="./README.zh-CN.md">简体中文</a></p>
+</div>
 
-用 Go 编写的 Codex 本地数据迁移 CLI。两台电脑通过 IP 直连，无需 SSH、云服务或预先配置证书。
+## Install
 
-支持本机 IP 查看、数据路径查看、Codex 退出检查、两端启动握手、TLS 1.3 加密、实时传输速率、SHA-256 校验，以及接收端备份和失败回滚。迁移采用复制方式，保留发送端数据。
+Install codex-transfer on both computers. Native binaries support **macOS, Linux, and Windows** on **amd64 and arm64**.
 
-## 安装
-
-在线安装需要已发布、可公开下载的 GitHub Release；npm 方式还需要对应版本的 npm 包。私有仓库或尚未发布时，可使用下方源码构建，或通过有权限的 GitHub 登录下载归档后手动安装。
-
-### npm（macOS、Linux、Windows）
-
-需要 Node.js 22 或更新版本，安装对应平台的原生 Go 二进制，无需本地 Go 编译器：
+### npm
 
 ```sh
 npm install --global @waterkyuu/codex-transfer
-codex-transfer --version
 ```
 
-### Homebrew（macOS）
+Requires Node.js 22 or newer. Downloads the native executable for your platform.
 
-沿用 Vimo 的 Cask 发布方式，支持 Apple Silicon 和 Intel：
+### Homebrew · macOS
 
 ```sh
 brew tap waterkyuu/codex-transfer https://github.com/Waterkyuu/codex-transfer.git
 brew install --cask waterkyuu/codex-transfer/codex-transfer
 ```
 
-### macOS / Linux 安装脚本
+### macOS and Linux
 
 ```sh
 curl -fsSL https://github.com/Waterkyuu/codex-transfer/releases/latest/download/install.sh | sh
 ```
 
-默认安装到 `~/.local/bin`；如该目录不在 PATH 中，按脚本提示添加。脚本支持 amd64 和 arm64。
+Installs to `~/.local/bin`. Add this directory to your `PATH` if needed.
 
-### Windows（PowerShell）
+### Windows · PowerShell
 
 ```powershell
 irm https://github.com/Waterkyuu/codex-transfer/releases/latest/download/install.ps1 | iex
 ```
 
-默认安装到 `%LOCALAPPDATA%\Programs\codex-transfer` 并更新用户 PATH，无需管理员权限。安装后打开新终端。
+Installs to `%LOCALAPPDATA%\Programs\codex-transfer` and adds it to your user `PATH`. Open a new terminal after installation.
 
-也可以通过稳定版发布后生成的 Scoop 清单安装：
+### Windows · Scoop
 
 ```powershell
 scoop bucket add codex-transfer https://github.com/Waterkyuu/codex-transfer.git
 scoop install codex-transfer/codex-transfer
 ```
 
-### 从源码构建
+You can also download a native archive from [Releases](https://github.com/Waterkyuu/codex-transfer/releases). See the [installation guide](./docs/installation.en-US.md) for upgrades and custom installation locations.
 
-需要 Go 1.22 或更新版本。在两台电脑上准备对应平台的可执行文件：
+## Features
 
-```sh
-mkdir -p bin
-go build -trimpath -o bin/codex-transfer ./cmd/codex-transfer
-./bin/codex-transfer help
-```
+| Feature | What you can do |
+| --- | --- |
+| **Direct IP connection** | Transfer between two computers over IPv4 or IPv6, without setting up SSH or a cloud service. |
+| **Address discovery** | List local interface addresses and copy a ready-to-use send command. |
+| **Both-terminal approval** | Compare and enter matching pairing codes on both computers before data can be sent. |
+| **Startup checks** | Check that Codex is stopped; the sender waits for the receiving terminal to start. |
+| **Live transfer progress** | View percentage, transferred bytes, total size, throughput in MiB/s, and elapsed time. |
+| **Encrypted transfer** | Protect the connection with TLS 1.3 and verify the archive with SHA-256 before installation. |
+| **Backups and recovery** | Keep source data and back up replaced destination roots; roll back ordinary installation failures. |
+| **Custom data locations** | Add external data directories and choose their destinations on the receiving computer. |
 
-可以将可执行文件放入 PATH，后续直接使用 `codex-transfer`。项目无第三方 Go 依赖。Windows 构建时使用 `go build -o bin/codex-transfer.exe ./cmd/codex-transfer`。
+## Quick start
 
-详细安装、升级和发布说明：[中文](docs/installation.zh-CN.md) · [English](docs/installation.en-US.md)。
+Quit Codex Desktop, CLI, IDE extensions, and its background daemon on **both computers**. Keep them closed until the transfer finishes.
 
-## 使用
-
-先退出两台电脑上的 Codex 桌面端、CLI、IDE 扩展及后台 daemon。
-
-接收电脑：
+**1. On the destination computer**, find a reachable IP and start receiving:
 
 ```sh
 codex-transfer address
-codex-transfer paths --all
-codex-transfer check
 codex-transfer receive
 ```
 
-发送电脑：
+**2. On the source computer**, connect to that IP:
 
 ```sh
-codex-transfer check
 codex-transfer send 192.168.1.20
 ```
 
-将示例 IP 替换为接收电脑的可达 IP。默认端口是 TCP `7432`。发送端可以先启动，会等待接收端，默认最多五分钟。
+Replace `192.168.1.20` with the destination's IP. The default port is TCP `7432`; both computers must be able to reach this port. Either terminal may start first. The sender waits up to five minutes for the receiver by default.
 
-连接后，两端显示相同的 12 位配对码。**分别输入另一台电脑屏幕显示的配对码**；核对不一致时立即停止。两个终端均批准、接收端完成目录和暂存检查后，才开始传送数据。
+**3. Verify the connection on both screens.** Each terminal displays a 12-character pairing code. Enter the code shown on the **other computer** at each prompt. The codes must match. Transfer begins after both approvals and the receiver's readiness check.
 
-进度包含已传输量、总量、百分比、MiB/s 和耗时。100% 表示网络传输结束；最终 `Migration complete` 表示接收端校验和安装均完成。
+Example progress:
 
-## 数据范围
-
-默认包括存在的 `CODEX_HOME`（通常为 `~/.codex`）、`~/.agents`、`~/Documents/Codex`，以及当前平台约定的桌面数据位置。macOS 还覆盖 Codex 应用数据、偏好设置、缓存、日志和保存状态。通过简单顶层 `config.toml` 路径或 `CODEX_SQLITE_HOME` 指定的外部 SQLite 目录也会被识别。实际列表以 `paths --all` 为准。
-
-OpenAI 官方将 `CODEX_HOME` 定义为配置、认证、日志、会话和技能等状态的根目录，并允许单独指定 SQLite 目录。参见 [环境变量](https://learn.chatgpt.com/docs/config-file/environment-variables#core-locations)。
-
-“完整”指所选数据根中的普通文件、目录和符号链接。工具不迁移系统钥匙串、不跟随符号链接复制外部内容、不自动收集任意项目仓库；运行时套接字会跳过并报告。Windows Store 的包隔离位置、非标准安装目录和其他自定义位置需要 `--extra` / `--map` 明确指定。
-
-接收端是**替换所传根**，不是合并会话。原数据保存为相邻 `.backup-*` 文件或目录。文件按接收用户创建，权限收紧至用户自身可访问；不复制源 UID/GID、ACL、扩展属性或硬链接关系。绝对项目路径、数据库中的工作目录、外部符号链接及配置中的绝对路径保持原文，用户名或目录结构不同时需要自行迁移对应项目和调整配置。认证可能需要重新登录。
-
-## 自定义目录与端口
-
-```sh
-# 接收端；自定义 SQLite 目标和端口
-codex-transfer receive --port 8000 --map sqlite=/Users/newuser/codex-sqlite
-
-# 发送端；自定义数据根和相同端口
-codex-transfer send 192.168.1.20 --port 8000 \
-  --codex-home /Users/olduser/.codex \
-  --sqlite-home /Users/olduser/codex-sqlite
-
-# 添加非标准数据位置，两端使用相同的根名称
-codex-transfer receive --map extra-state=/absolute/destination
-codex-transfer send 192.168.1.20 --extra extra-state=/absolute/source
+```text
+42.0% | 84.00 / 200.00 MiB | 18.60 MiB/s | 5.0s
 ```
 
-同一个示例中的两端命令在各自电脑运行。`--extra` 和 `--map` 可重复，但名称不能重复、路径不能重叠。接收端的路径始终由接收端选择。
+Wait for **`Migration complete`**. A 100% progress line means the network transfer has finished; the receiver still verifies and installs the data before confirming completion.
 
-## 开发和说明
+## What gets transferred
+
+Existing files in these data roots are included:
+
+| Data | Location |
+| --- | --- |
+| Conversations, history, configuration, file-based credentials, plugins, and worktrees | `CODEX_HOME`, usually `~/.codex` |
+| User skills and agent configuration | `~/.agents` |
+| Projectless chat workspaces | `~/Documents/Codex` |
+| Desktop application data | Conventional platform-specific Codex locations, including macOS preferences and cache |
+| External SQLite state and logs | Recognized top-level configuration paths or `CODEX_SQLITE_HOME` |
+
+Inspect the exact locations on your computer:
 
 ```sh
-task fmt
-task lint
-task test
-task build
-task test-installers
+codex-transfer paths --all
+codex-transfer check
 ```
 
-测试包括单元测试、回环网络 TLS 集成测试和两个真实 CLI 进程的端到端测试，使用隔离的临时数据。二进制、测试产物和 `work/` 已加入 `.gitignore`。
+Destination roots are **replaced as a batch, rather than merged**. Existing data is kept in adjacent `.backup-*` files or directories; the source remains intact. Symbolic links are preserved without copying their external targets. Runtime sockets are skipped and reported.
 
-详细说明：[中文](docs/migration.zh-CN.md) · [English](docs/migration.en-US.md)。
+Raw state transfer requires the **same operating system** on both computers. OS keychain credentials and project repositories outside the selected roots need separate handling. Absolute paths in configuration and session data are preserved, so a different username or directory layout may require path adjustments and signing in again.
+
+## Choose your connection and data locations
+
+### Use a different port or wait longer
+
+On the destination:
+
+```sh
+codex-transfer receive --port 8000
+```
+
+On the source:
+
+```sh
+codex-transfer send 192.168.1.20 --port 8000 --wait 10m
+```
+
+### Include an external directory
+
+On the destination, choose where the named root should be installed:
+
+```sh
+codex-transfer receive --map project-data=/absolute/destination
+```
+
+On the source, add that root to the transfer:
+
+```sh
+codex-transfer send 192.168.1.20 --extra project-data=/absolute/source
+```
+
+Repeat `--extra` and `--map` for multiple roots. Names must match between computers and paths must not overlap. Use `--codex-home` or `--sqlite-home` to select custom Codex state locations.
+
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `address` | Show local IP addresses and connection examples. |
+| `paths --all` | Show all conventional data roots, including missing locations. |
+| `check` | Check local Codex shutdown and data availability. |
+| `receive` | Wait for one approved transfer and install the received data. |
+| `send <ip>` | Send selected local data to the receiving computer. |
+| `--version` | Show the installed version. |
+
+Run `codex-transfer help` or `codex-transfer <command> --help` for options.
+
+[Installation and upgrades](./docs/installation.en-US.md) · [Migration and recovery](./docs/migration.en-US.md)

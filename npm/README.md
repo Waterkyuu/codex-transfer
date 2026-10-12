@@ -10,7 +10,6 @@ codex-transfer --version
 Requires Node.js 22 or newer and a publicly reachable GitHub Release matching
 this npm package version. The package downloads and verifies the release's
 SHA-256 checksum during `postinstall`; no local Go compiler is needed.
-The repository's initial development package is not a published release.
 
 If lifecycle scripts were disabled, run:
 
@@ -29,4 +28,4 @@ On Node.js versions supporting `--use-env-proxy`, the installer enables it when
 `HTTPS_PROXY` or `HTTP_PROXY` is configured. Windows extraction uses PowerShell;
 macOS/Linux extraction uses `tar`.
 
-Usage and migration limitations: [project documentation](https://github.com/Waterkyuu/codex-transfer).
+Usage and migration: [English](https://github.com/Waterkyuu/codex-transfer#readme) · [简体中文](https://github.com/Waterkyuu/codex-transfer/blob/HEAD/README.zh-CN.md).

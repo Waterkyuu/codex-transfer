@@ -20,7 +20,11 @@ archives:
       - goos: windows
         formats: [zip]
     name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
-    files: [README.md]
+    files:
+      - README.md
+      - README.zh-CN.md
+      - assets/logo-codex-transfer*.png
+      - docs/*.md
 
 checksum:
   name_template: checksums.txt
