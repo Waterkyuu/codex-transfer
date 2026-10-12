@@ -3,3 +3,9 @@ work/
 *.test
 *.out
 .DS_Store
+
+# Release archives and npm installation artifacts
+/dist/
+node_modules/
+npm/vendor/
+*.tgz

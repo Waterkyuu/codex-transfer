@@ -1,0 +1,68 @@
+version: 2
+project_name: codex-transfer
+
+builds:
+  - id: codex-transfer
+    main: ./cmd/codex-transfer
+    binary: codex-transfer
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.releaseVersion={{ .Version }}
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: codex-transfer
+    ids: [codex-transfer]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    files: [README.md]
+
+checksum:
+  name_template: checksums.txt
+
+homebrew_casks:
+  - name: codex-transfer
+    ids: [codex-transfer]
+    binaries: [codex-transfer]
+    description: Transfer local Codex data between computers over an encrypted IP connection
+    homepage: https://github.com/Waterkyuu/codex-transfer
+    directory: Casks
+    skip_upload: auto
+    commit_msg_template: |
+      chore(brew): update codex-transfer to {{ .Tag }}
+
+      - publish the macOS release cask
+    repository:
+      owner: Waterkyuu
+      name: codex-transfer
+      # GoReleaser resolves the repository's default branch; do not assume main.
+
+scoops:
+  - name: codex-transfer
+    description: Transfer local Codex data between computers over an encrypted IP connection
+    homepage: https://github.com/Waterkyuu/codex-transfer
+    skip_upload: auto
+    commit_msg_template: |
+      chore(scoop): update codex-transfer to {{ .Tag }}
+
+      - publish the Windows release manifest
+    repository:
+      owner: Waterkyuu
+      name: codex-transfer
+
+changelog:
+  sort: asc
+  filters:
+    exclude: ['^docs', '^test', '^chore']
+
+release:
+  draft: false
+  prerelease: auto
+  extra_files:
+    - glob: scripts/install.sh
+    - glob: scripts/install.ps1

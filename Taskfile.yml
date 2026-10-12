@@ -23,3 +23,13 @@ tasks:
     cmds:
       - mkdir -p bin
       - go build -trimpath -o bin/codex-transfer ./cmd/codex-transfer
+
+  test-installers:
+    desc: Test npm and native installers (macOS/Linux)
+    cmds:
+      - npm --prefix npm test
+      - sh scripts/install.test.sh
+  release-check:
+    desc: Validate release configuration without publishing
+    cmds:
+      - goreleaser check
