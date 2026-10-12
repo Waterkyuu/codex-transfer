@@ -1,5 +1,5 @@
-// Command codex-transfer migrates local Codex data over an approved encrypted IP connection.
-package main
+// Package cmd owns terminal commands and user interaction for Codex migration.
+package cmd
 
 import (
 	"bufio"
@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"os/signal"
 	"strings"
 )
 
@@ -18,17 +16,24 @@ type application struct {
 	input io.Reader
 	// output receives help, status, and progress lines.
 	output io.Writer
+	// version is read-only release metadata supplied by the program entry point.
+	version string
 }
 
-// main translates operating-system cancellation and command failures into process exit status.
-func main() {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
-	app := &application{input: os.Stdin, output: os.Stdout}
-	if err := app.run(ctx, os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
-		os.Exit(1)
-	}
+// Options supplies terminal streams and immutable release metadata to the command runner.
+type Options struct {
+	// Input supplies explicit pairing approval from the terminal.
+	Input io.Reader
+	// Output receives help, pairing prompts, and migration status.
+	Output io.Writer
+	// Version is the release string supplied by the executable's linker metadata.
+	Version string
+}
+
+// Run executes one terminal command using dependencies supplied by the executable.
+func Run(ctx context.Context, args []string, options Options) error {
+	app := &application{input: options.Input, output: options.Output, version: options.Version}
+	return app.run(ctx, args)
 }
 
 // run selects a single command and rejects accidental extra arguments.
@@ -39,7 +44,7 @@ func (a *application) run(ctx context.Context, args []string) error {
 	}
 	switch args[0] {
 	case "version", "--version":
-		fmt.Fprintln(a.output, "codex-transfer", releaseVersion)
+		_, _ = fmt.Fprintln(a.output, "codex-transfer", a.version)
 		return nil
 	case "help", "--help", "-h":
 		a.help()
@@ -55,7 +60,7 @@ func (a *application) run(ctx context.Context, args []string) error {
 
 // help describes the IP-only command path and the safety conditions for replacement.
 func (a *application) help() {
-	fmt.Fprint(a.output, `codex-transfer - encrypted local Codex migration
+	_, _ = fmt.Fprint(a.output, `codex-transfer - encrypted local Codex migration
 
 Usage:
   codex-transfer --version                     Show the installed release version
@@ -75,7 +80,11 @@ The source is retained. Use <command> --help for options.
 
 // confirm requires the exact TLS pairing code rather than a blind yes response.
 func (a *application) confirm(ctx context.Context, code string) error {
-	fmt.Fprintf(a.output, "Pairing code: %s\nEnter the pairing code shown on the OTHER computer (must match): ", code)
+	_, _ = fmt.Fprintf(
+		a.output,
+		"Pairing code: %s\nEnter the pairing code shown on the OTHER computer (must match): ",
+		code,
+	)
 	result := make(chan string, 1)
 	readError := make(chan error, 1)
 	// The process owns stdin; cancellation may leave this read waiting until process exit.
