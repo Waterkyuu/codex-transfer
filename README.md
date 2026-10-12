@@ -4,7 +4,52 @@
 
 支持本机 IP 查看、数据路径查看、Codex 退出检查、两端启动握手、TLS 1.3 加密、实时传输速率、SHA-256 校验，以及接收端备份和失败回滚。迁移采用复制方式，保留发送端数据。
 
-## 构建
+## 安装
+
+在线安装需要已发布、可公开下载的 GitHub Release；npm 方式还需要对应版本的 npm 包。私有仓库或尚未发布时，可使用下方源码构建，或通过有权限的 GitHub 登录下载归档后手动安装。
+
+### npm（macOS、Linux、Windows）
+
+需要 Node.js 22 或更新版本，安装对应平台的原生 Go 二进制，无需本地 Go 编译器：
+
+```sh
+npm install --global @waterkyuu/codex-transfer
+codex-transfer --version
+```
+
+### Homebrew（macOS）
+
+沿用 Vimo 的 Cask 发布方式，支持 Apple Silicon 和 Intel：
+
+```sh
+brew tap waterkyuu/codex-transfer https://github.com/Waterkyuu/codex-transfer.git
+brew install --cask waterkyuu/codex-transfer/codex-transfer
+```
+
+### macOS / Linux 安装脚本
+
+```sh
+curl -fsSL https://github.com/Waterkyuu/codex-transfer/releases/latest/download/install.sh | sh
+```
+
+默认安装到 `~/.local/bin`；如该目录不在 PATH 中，按脚本提示添加。脚本支持 amd64 和 arm64。
+
+### Windows（PowerShell）
+
+```powershell
+irm https://github.com/Waterkyuu/codex-transfer/releases/latest/download/install.ps1 | iex
+```
+
+默认安装到 `%LOCALAPPDATA%\Programs\codex-transfer` 并更新用户 PATH，无需管理员权限。安装后打开新终端。
+
+也可以通过稳定版发布后生成的 Scoop 清单安装：
+
+```powershell
+scoop bucket add codex-transfer https://github.com/Waterkyuu/codex-transfer.git
+scoop install codex-transfer/codex-transfer
+```
+
+### 从源码构建
 
 需要 Go 1.22 或更新版本。在两台电脑上准备对应平台的可执行文件：
 
@@ -14,7 +59,9 @@ go build -trimpath -o bin/codex-transfer ./cmd/codex-transfer
 ./bin/codex-transfer help
 ```
 
-可以将可执行文件放入 PATH，后续直接使用 `codex-transfer`。项目无第三方 Go 依赖。
+可以将可执行文件放入 PATH，后续直接使用 `codex-transfer`。项目无第三方 Go 依赖。Windows 构建时使用 `go build -o bin/codex-transfer.exe ./cmd/codex-transfer`。
+
+详细安装、升级和发布说明：[中文](docs/installation.zh-CN.md) · [English](docs/installation.en-US.md)。
 
 ## 使用
 
@@ -77,6 +124,7 @@ task fmt
 task lint
 task test
 task build
+task test-installers
 ```
 
 测试包括单元测试、回环网络 TLS 集成测试和两个真实 CLI 进程的端到端测试，使用隔离的临时数据。二进制、测试产物和 `work/` 已加入 `.gitignore`。
