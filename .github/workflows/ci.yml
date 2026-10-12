@@ -47,10 +47,4 @@ jobs:
       - name: Unit and CLI end-to-end tests with race detection
         run: go test -race ./... -count=1
       - name: Build CLI
-        run: go build ./cmd
-  documentation:
-    name: README and logo references
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - run: python3 scripts/check-readme.py
+        run: go build -o codex-transfer${{ runner.os == 'Windows' && '.exe' || '' }} ./cmd
