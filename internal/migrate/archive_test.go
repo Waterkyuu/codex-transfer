@@ -1,0 +1,95 @@
+package migrate
+
+import (
+	"archive/tar"
+	"bytes"
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// TestArchiveRoundTrip verifies hidden files, empty directories, links, and private permissions.
+func TestArchiveRoundTrip(t *testing.T) {
+	source := t.TempDir()
+	if err := os.Mkdir(filepath.Join(source, "empty"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, ".secret"), []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(".secret", filepath.Join(source, "link")); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := Snapshot([]Root{{Name: "codex", Path: source}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bundle.Close()
+	destination := t.TempDir()
+	if err := Extract(bundle.File, destination, bundle.Size); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(destination, "codex", ".secret"))
+	if err != nil || string(got) != "fixture" {
+		t.Fatalf("content: %q, %v", got, err)
+	}
+	link, err := os.Readlink(filepath.Join(destination, "codex", "link"))
+	if err != nil || link != ".secret" {
+		t.Fatalf("link: %q, %v", link, err)
+	}
+	info, err := os.Stat(filepath.Join(destination, "codex", ".secret"))
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("permissions: %v, %v", info, err)
+	}
+}
+
+// TestSnapshotCancellation prevents copying data after the caller cancels the operation.
+func TestSnapshotCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if bundle, err := SnapshotContext(ctx, []Root{{Name: "codex", Path: t.TempDir()}}); err == nil {
+		_ = bundle.Close()
+		t.Fatal("canceled snapshot succeeded")
+	}
+}
+
+// TestExtractRejectsUnsafeEntries proves that untrusted archives cannot escape staging.
+func TestExtractRejectsUnsafeEntries(t *testing.T) {
+	for _, name := range []string{"../escape", "/escape", "codex/../../escape", `codex\escape`, "codex/C:escape"} {
+		t.Run(name, func(t *testing.T) {
+			var data bytes.Buffer
+			writer := tar.NewWriter(&data)
+			if err := writer.WriteHeader(&tar.Header{Name: name, Mode: 0600, Size: 0}); err != nil {
+				t.Fatal(err)
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := Extract(&data, t.TempDir(), int64(data.Len())); err == nil {
+				t.Fatal("unsafe entry accepted")
+			}
+		})
+	}
+}
+
+// TestExtractRejectsSymlinkAncestor verifies deferred links cannot replace directories.
+func TestExtractRejectsSymlinkAncestor(t *testing.T) {
+	var data bytes.Buffer
+	w := tar.NewWriter(&data)
+	for _, header := range []*tar.Header{
+		{Name: "codex", Typeflag: tar.TypeDir, Mode: 0700},
+		{Name: "codex/link", Typeflag: tar.TypeSymlink, Linkname: "../../outside"},
+		{Name: "codex/link/file", Typeflag: tar.TypeReg, Mode: 0600},
+	} {
+		if err := w.WriteHeader(header); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := Extract(&data, t.TempDir(), int64(data.Len())); err == nil {
+		t.Fatal("symlink ancestor accepted")
+	}
+}
