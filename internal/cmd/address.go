@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"errors"
@@ -40,9 +40,9 @@ func (a *application) address(args []string) error {
 			if err != nil || !ip.IsGlobalUnicast() {
 				continue
 			}
-			fmt.Fprintf(a.output, "%s\t%s\t codex-transfer send %s --port %d\n", network.Name, ip, ip, *port)
+			_, _ = fmt.Fprintf(a.output, "%s\t%s\t codex-transfer send %s --port %d\n", network.Name, ip, ip, *port)
 		}
 	}
-	fmt.Fprintln(a.output, "Choose an IP reachable from the other computer. Allow the TCP port in its firewall.")
+	_, _ = fmt.Fprintln(a.output, "Choose an IP reachable from the other computer. Allow the TCP port in its firewall.")
 	return nil
 }

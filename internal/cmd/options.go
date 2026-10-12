@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"errors"
@@ -61,7 +61,12 @@ func (a *application) parseOptions(command string, args []string) (*options, []s
 	flags.SetOutput(a.output)
 	flags.StringVar(&values.codexHome, "codex-home", os.Getenv("CODEX_HOME"), "Codex state root (default ~/.codex)")
 	flags.StringVar(&values.sqliteHome, "sqlite-home", "", "Override separately stored SQLite root")
-	flags.BoolVar(&values.skipCheck, "skip-process-check", false, "Skip shutdown detection; use only with synthetic test data")
+	flags.BoolVar(
+		&values.skipCheck,
+		"skip-process-check",
+		false,
+		"Skip shutdown detection; use only with synthetic test data",
+	)
 	if command == "send" || command == "receive" {
 		flags.IntVar(&values.port, "port", 7432, "TCP port (1-65535)")
 	}

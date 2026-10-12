@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"context"
@@ -44,7 +44,10 @@ func (a *application) migration(ctx context.Context, command string, args []stri
 	}
 	guard := migrate.CheckStopped
 	if options.skipCheck {
-		fmt.Fprintln(a.output, "Process check disabled. Use only synthetic data; live databases may be inconsistent.")
+		_, _ = fmt.Fprintln(
+			a.output,
+			"Process check disabled. Use only synthetic data; live databases may be inconsistent.",
+		)
 		guard = nil
 	}
 	if guard != nil {
@@ -57,7 +60,10 @@ func (a *application) migration(ctx context.Context, command string, args []stri
 		if len(roots) == 0 {
 			return errors.New("no Codex source data found")
 		}
-		fmt.Fprintln(a.output, "Local startup check passed. Both transfer terminals must also connect and approve pairing.")
+		_, _ = fmt.Fprintln(
+			a.output,
+			"Local startup check passed. Both transfer terminals must also connect and approve pairing.",
+		)
 		return nil
 	}
 	a.printRoots(roots)
@@ -83,8 +89,11 @@ func (a *application) migration(ctx context.Context, command string, args []stri
 	if err != nil {
 		return fmt.Errorf("start receiver: %w", err)
 	}
-	defer listener.Close()
-	fmt.Fprintln(a.output, "Destination roots offered by the sender will be replaced; existing data will be backed up.")
+	defer func() { _ = listener.Close() }()
+	_, _ = fmt.Fprintln(
+		a.output,
+		"Destination roots offered by the sender will be replaced; existing data will be backed up.",
+	)
 	return receiver.Serve(ctx, listener)
 }
 
@@ -95,6 +104,6 @@ func (a *application) printRoots(roots []migrate.Root) {
 		if _, err := os.Lstat(root.Path); errors.Is(err, os.ErrNotExist) {
 			status = "missing"
 		}
-		fmt.Fprintf(a.output, "%s\t%s\t[%s]\n", root.Name, root.Path, status)
+		_, _ = fmt.Fprintf(a.output, "%s\t%s\t[%s]\n", root.Name, root.Path, status)
 	}
 }
