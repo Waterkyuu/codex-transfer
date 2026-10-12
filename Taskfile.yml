@@ -6,12 +6,15 @@ tasks:
     cmds: [task --list]
   fmt:
     desc: Format Go source
-    cmds: [gofmt -w cmd internal]
+    cmds:
+      - gofmt -w cmd internal e2e
+      - golangci-lint fmt
   lint:
     desc: Check formatting and Go diagnostics
     cmds:
-      - test -z "$(gofmt -l cmd internal)"
+      - test -z "$(gofmt -l cmd internal e2e)"
       - go vet ./...
+      - golangci-lint run --timeout=5m
   test:
     desc: Test with race detection
     cmds: [go test -race ./... -count=1]
@@ -22,7 +25,7 @@ tasks:
     desc: Build the CLI
     cmds:
       - mkdir -p bin
-      - go build -trimpath -o bin/codex-transfer ./cmd/codex-transfer
+      - go build -trimpath -o bin/codex-transfer ./cmd
 
   test-installers:
     desc: Test npm and native installers (macOS/Linux)
