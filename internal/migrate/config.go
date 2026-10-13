@@ -39,13 +39,19 @@ func translateConfig(data []byte, mapper *pathMapper) ([]byte, error) {
 	lines := strings.Split(string(data), "\n")
 	arrayPaths := false
 	topLevel := true
+	var context configContext
 	for index, line := range lines {
+		statement := context.scan(line)
 		if arrayPaths {
 			translated, remaining, err := translatePathArray(line, mapper)
 			if err != nil {
 				return nil, fmt.Errorf("config path array on line %d: %w", index+1, err)
 			}
 			lines[index], arrayPaths = translated, remaining
+			continue
+		}
+		// Instructions can contain path-shaped examples; only actual statements may be rewritten.
+		if !statement {
 			continue
 		}
 		trimmed := strings.TrimSpace(line)
@@ -154,7 +160,11 @@ func ensureStateConfig(installation *installation, mapper *pathMapper) error {
 		return err
 	}
 	defined := map[string]bool{}
+	var context configContext
 	for _, line := range strings.Split(string(data), "\n") {
+		if !context.scan(line) {
+			continue
+		}
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "[") {
 			break

@@ -109,7 +109,11 @@ func configuredPaths(path string) (map[string]string, error) {
 	defer func() { _ = file.Close() }()
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 4096), 1<<20)
+	var context configContext
 	for scanner.Scan() {
+		if !context.scan(scanner.Text()) {
+			continue
+		}
 		line := strings.TrimSpace(scanner.Text())
 		if strings.HasPrefix(line, "[") {
 			break
