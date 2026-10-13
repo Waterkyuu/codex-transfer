@@ -19,7 +19,9 @@ import (
 func pathField(key string) bool {
 	switch key {
 	case "cwd", "path", "rollout_path", "sqlite_home", "log_dir", "workspace_root", "root", "worktree_path",
-		"electron-saved-workspace-roots", "active-workspace-roots", "writable_roots", "workspace_roots":
+		"electron-saved-workspace-roots", "active-workspace-roots", "writable_roots", "workspace_roots",
+		"runtime_workspace_roots":
+		// Native resume restores these roots before starting a turn, so foreign paths must be mapped too.
 		return true
 	default:
 		return false
