@@ -34,11 +34,9 @@ type databaseValue struct {
 
 // databaseURI escapes filesystem names and forbids accidentally creating a missing state database.
 func databaseURI(file string) string {
-	path := filepath.ToSlash(file)
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-	return (&url.URL{Scheme: "file", Path: path, RawQuery: "mode=rw"}).String()
+	// The embedded VFS expects the decoded native path. A fabricated slash before C:/
+	// produces an invalid Windows filename; escaping also avoids URI authority parsing for UNC paths.
+	return "file:" + url.PathEscape(filepath.ToSlash(file)) + "?mode=rw"
 }
 
 // translateDatabase adapts supported state columns inside private staging in one database transaction.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,18 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 )
+
+// TestDatabaseURI preserves native filenames and prevents special characters from becoming URI options.
+func TestDatabaseURI(t *testing.T) {
+	for _, file := range []string{"/tmp/state # 100%.sqlite", "C:/Users/source/state.sqlite", "//server/share/state.sqlite"} {
+		dsn := databaseURI(file)
+		encoded := strings.TrimSuffix(strings.TrimPrefix(dsn, "file:"), "?mode=rw")
+		decoded, err := url.PathUnescape(encoded)
+		if err != nil || decoded != filepath.ToSlash(file) {
+			t.Fatalf("native path changed: %q -> %q, %v", file, decoded, err)
+		}
+	}
+}
 
 // TestCompressedRolloutAdaptation preserves the original file and points SQLite at converted plain metadata.
 func TestCompressedRolloutAdaptation(t *testing.T) {
