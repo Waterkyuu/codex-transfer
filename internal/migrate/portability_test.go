@@ -2,11 +2,73 @@ package migrate
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// TestJSONTranslationFraming rejects extra values and preserves malformed trailing input errors.
+func TestJSONTranslationFraming(t *testing.T) {
+	mapper, err := newPathMapper("linux", map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		// name identifies the framing boundary being checked.
+		name string
+		// data contains a complete metadata value and optional trailing content.
+		data string
+		// wantError distinguishes invalid framing from permitted trailing whitespace.
+		wantError string
+		// wantSyntax requires the original JSON syntax error to remain discoverable.
+		wantSyntax bool
+		// wantUnexpectedEOF requires an incomplete trailing value to retain its cause.
+		wantUnexpectedEOF bool
+	}{
+		{name: "single value", data: `{ "text": "unchanged" }`},
+		{name: "trailing whitespace", data: "{} \n\t"},
+		{name: "second object", data: "{} {}", wantError: "metadata contains more than one JSON value"},
+		{name: "second null", data: "{} null", wantError: "metadata contains more than one JSON value"},
+		{name: "second scalar", data: "{} false", wantError: "metadata contains more than one JSON value"},
+		{name: "trailing garbage", data: "{} garbage", wantError: "decode trailing metadata", wantSyntax: true},
+		{
+			name:       "malformed trailing object",
+			data:       `{} {"key":]}`,
+			wantError:  "decode trailing metadata",
+			wantSyntax: true,
+		},
+		{
+			name:              "incomplete trailing object",
+			data:              "{} {",
+			wantError:         "decode trailing metadata",
+			wantUnexpectedEOF: true,
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			translated, err := translateJSON([]byte(test.data), mapper)
+			if test.wantError == "" {
+				if err != nil || string(translated) != test.data {
+					t.Fatalf("unchanged metadata: %q, %v", translated, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantError) || translated != nil {
+				t.Fatalf("expected %q and no translated data, got %q, %v", test.wantError, translated, err)
+			}
+			var syntaxError *json.SyntaxError
+			if errors.As(err, &syntaxError) != test.wantSyntax {
+				t.Fatalf("unexpected JSON syntax error chain: %v", err)
+			}
+			if errors.Is(err, io.ErrUnexpectedEOF) != test.wantUnexpectedEOF {
+				t.Fatalf("unexpected incomplete input error chain: %v", err)
+			}
+		})
+	}
+}
 
 // TestConfigTranslation keeps TOML formatting, comments, and unrelated strings while changing path fields.
 func TestConfigTranslation(t *testing.T) {

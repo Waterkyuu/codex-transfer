@@ -45,23 +45,29 @@ const maxShellNesting = 8
 
 // hookEvent carries the working directory and pending tool call from Codex.
 type hookEvent struct {
-	CWD       string    `json:"cwd"`
+	// CWD locates the repository whose instructions apply to the pending command.
+	CWD string `json:"cwd"`
+	// ToolInput supplies the pending shell invocation to inspect for Git commits.
 	ToolInput toolInput `json:"tool_input"`
 }
 
 // toolInput contains the shell command about to be executed.
 type toolInput struct {
+	// Command is shell source inspected without executing it.
 	Command string `json:"command"`
 }
 
 // hookOutput wraps context returned to the Codex hook protocol.
 type hookOutput struct {
+	// HookSpecificOutput carries context consumed by the Codex hook handler.
 	HookSpecificOutput hookSpecificOutput `json:"hookSpecificOutput"`
 }
 
 // hookSpecificOutput supplies instructions before the pending tool call.
 type hookSpecificOutput struct {
-	HookEventName     string `json:"hookEventName"`
+	// HookEventName associates this response with the pre-tool-use hook event.
+	HookEventName string `json:"hookEventName"`
+	// AdditionalContext contains repository instructions reloaded before a commit.
 	AdditionalContext string `json:"additionalContext"`
 }
 

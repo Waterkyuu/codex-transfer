@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"math"
 	"net/url"
 	"path/filepath"
@@ -77,7 +78,7 @@ func translateDatabase(ctx context.Context, file string, mapper *pathMapper) err
 		err := tx.QueryRowContext(ctx,
 			"SELECT count(*) FROM pragma_table_info(?) WHERE name = ?", column.table, column.column).Scan(&exists)
 		if err != nil {
-			return err
+			return fmt.Errorf("inspect schema %s.%s: %w", column.table, column.column, err)
 		}
 		if exists == 0 {
 			continue
@@ -103,26 +104,26 @@ func translateColumn(ctx context.Context, tx *sql.Tx, column databaseColumn, map
 	updateSQL := `UPDATE "` + column.table + `" SET "` + column.column + `" = ? WHERE rowid = ?`
 	statement, err := tx.PrepareContext(ctx, updateSQL)
 	if err != nil {
-		return err
+		return fmt.Errorf("prepare update %s.%s: %w", column.table, column.column, err)
 	}
 	defer func() { _ = statement.Close() }()
 	cursor := int64(math.MinInt64)
 	for {
 		rows, err := tx.QueryContext(ctx, selectSQL, cursor)
 		if err != nil {
-			return err
+			return fmt.Errorf("query %s.%s after rowid %d: %w", column.table, column.column, cursor, err)
 		}
 		batch := make([]databaseValue, 0, 256)
 		for rows.Next() {
 			var value databaseValue
 			if err := rows.Scan(&value.id, &value.text); err != nil {
 				_ = rows.Close()
-				return err
+				return fmt.Errorf("scan %s.%s rowid %d: %w", column.table, column.column, value.id, err)
 			}
 			batch = append(batch, value)
 		}
 		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-			return err
+			return fmt.Errorf("read batch %s.%s after rowid %d: %w", column.table, column.column, cursor, err)
 		}
 		if len(batch) == 0 {
 			return nil
@@ -141,13 +142,14 @@ func translateColumn(ctx context.Context, tx *sql.Tx, column databaseColumn, map
 			if column.json && strings.TrimSpace(value.text.String) != "" {
 				data, err := translateJSON([]byte(value.text.String), mapper)
 				if err != nil {
-					return err
+					// Malformed metadata needs a record location; wrapping also preserves the decoder error.
+					return fmt.Errorf("decode JSON %s.%s rowid %d: %w", column.table, column.column, value.id, err)
 				}
 				mapped = string(data)
 			}
 			if mapped != value.text.String {
 				if _, err := statement.ExecContext(ctx, mapped, value.id); err != nil {
-					return err
+					return fmt.Errorf("update %s.%s rowid %d: %w", column.table, column.column, value.id, err)
 				}
 			}
 		}

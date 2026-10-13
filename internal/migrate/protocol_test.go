@@ -15,6 +15,55 @@ import (
 	"time"
 )
 
+// TestReceivePathMappingValidation rejects invalid mappings before readiness or staging allocation.
+func TestReceivePathMappingValidation(t *testing.T) {
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "history.jsonl"), []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		// name identifies which side of the mapping violates the absolute path contract.
+		name string
+		// source is the sender prefix supplied as an explicit mapping key.
+		source string
+		// target is the receiver destination supplied as an explicit mapping value.
+		target string
+	}{
+		{name: "relative source", source: "relative", target: t.TempDir()},
+		{name: "relative target", source: source, target: "relative"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			destination := filepath.Join(t.TempDir(), "codex")
+			checks := 0
+			receiver := &Receiver{
+				Targets: map[string]string{"codex": destination}, Output: io.Discard, MaxBytes: 1 << 20,
+				PathMappings: map[string]string{test.source: test.target},
+				Check:        func() error { checks++; return nil },
+			}
+			address, ctx, done := startReceiver(t, receiver)
+			sender := &Sender{
+				Roots: []Root{{Name: "codex", Path: source}}, Output: io.Discard,
+				Fingerprint: receiver.Fingerprint(),
+			}
+			if err := sender.Send(ctx, address); err == nil || !strings.Contains(err.Error(), "receiver readiness") {
+				t.Fatalf("expected mapping rejection before readiness, got %v", err)
+			}
+			if err := <-done; err == nil || !strings.Contains(err.Error(), "path mapping requires absolute") {
+				t.Fatalf("expected mapping validation error, got %v", err)
+			}
+			if checks != 0 {
+				t.Fatalf("process check ran before mapping validation: %d", checks)
+			}
+			for _, path := range []string{destination, destination + ".transfer-lock"} {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Fatalf("invalid mapping created staging or destination state: %s, %v", path, err)
+				}
+			}
+		})
+	}
+}
+
 // startReceiver supplies a local transport fixture with bounded cleanup and no external service.
 func startReceiver(t *testing.T, receiver *Receiver) (string, context.Context, <-chan error) {
 	t.Helper()

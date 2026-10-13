@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"os"
@@ -21,6 +22,15 @@ func TestTransferEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(source, "history.jsonl"), []byte("synthetic history"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := json.Marshal(map[string]string{
+		"cwd": filepath.Join(source, "project"), "text": filepath.Join(source, "project"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, ".codex-global-state.json"), metadata, 0600); err != nil {
 		t.Fatal(err)
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -50,6 +60,18 @@ func TestTransferEndToEnd(t *testing.T) {
 	got, err := os.ReadFile(filepath.Join(destination, "history.jsonl"))
 	if err != nil || string(got) != "synthetic history" {
 		t.Fatalf("restored: %q, %v", got, err)
+	}
+	got, err = os.ReadFile(filepath.Join(destination, ".codex-global-state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var translated map[string]string
+	if err := json.Unmarshal(got, &translated); err != nil {
+		t.Fatal(err)
+	}
+	if translated["cwd"] != filepath.Join(destination, "project") ||
+		translated["text"] != filepath.Join(source, "project") {
+		t.Fatalf("received metadata paths: %s", got)
 	}
 	backups, err := filepath.Glob(destination + ".backup-*")
 	if err != nil || len(backups) != 1 {

@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 )
 
@@ -122,27 +121,12 @@ func configuredPaths(path string) (map[string]string, error) {
 			continue
 		}
 		value = strings.TrimSpace(value)
-		var decoded string
-		if strings.HasPrefix(value, "'") {
-			end := strings.Index(value[1:], "'")
-			if end >= 0 {
-				decoded = value[1 : end+1]
-				value = value[end+2:]
-			}
-		} else if strings.HasPrefix(value, "\"") {
-			for end := 1; end < len(value); end++ {
-				if value[end] != '"' {
-					continue
-				}
-				parsed, err := strconv.Unquote(value[:end+1])
-				if err == nil {
-					decoded = parsed
-					value = value[end+1:]
-					break
-				}
-			}
+		// Discovery and config translation must agree on quote boundaries and supported path syntax.
+		decoded, length, err := quotedPath(value)
+		if err != nil {
+			return nil, fmt.Errorf("unsupported %s syntax in %s; use a simple quoted path: %w", key, path, err)
 		}
-		trailing := strings.TrimSpace(value)
+		trailing := strings.TrimSpace(value[length:])
 		if decoded == "" || (trailing != "" && !strings.HasPrefix(trailing, "#")) {
 			return nil, fmt.Errorf("unsupported %s syntax in %s; use a simple quoted path", key, path)
 		}

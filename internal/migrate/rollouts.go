@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -73,8 +74,13 @@ func translateJSON(data []byte, mapper *pathMapper) ([]byte, error) {
 	if err := decoder.Decode(&value); err != nil {
 		return nil, err
 	}
-	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+	err := decoder.Decode(new(any))
+	if err == nil {
 		return nil, errors.New("metadata contains more than one JSON value")
+	}
+	if !errors.Is(err, io.EOF) {
+		// Invalid trailing input is not a second value; retain the decoder's syntax or truncation error.
+		return nil, fmt.Errorf("decode trailing metadata: %w", err)
 	}
 	mapped, changed := translateValue(value, mapper, false)
 	if !changed {
