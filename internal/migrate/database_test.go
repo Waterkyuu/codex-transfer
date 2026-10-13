@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -11,7 +12,75 @@ import (
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/ncruces/go-sqlite3"
 )
+
+// TestDatabaseTranslationErrors identifies failed operations and records without losing their original errors.
+func TestDatabaseTranslationErrors(t *testing.T) {
+	cases := []struct {
+		// name identifies the failure being reproduced.
+		name string
+		// setup creates the schema and data that trigger the failure.
+		setup string
+		// wantContext identifies the operation and record expected in the diagnostic.
+		wantContext string
+	}{
+		{
+			name: "invalid JSON",
+			setup: `CREATE TABLE projects (metadata TEXT);
+				INSERT INTO projects VALUES ('{invalid');`,
+			wantContext: "decode JSON projects.metadata rowid 1",
+		},
+		{
+			name: "rejected update",
+			setup: `CREATE TABLE project_roots (path TEXT);
+				INSERT INTO project_roots VALUES ('/home/source/project');
+				CREATE TRIGGER reject_update BEFORE UPDATE ON project_roots
+				BEGIN SELECT RAISE(ABORT, 'fixture update rejected'); END;`,
+			wantContext: "update project_roots.path rowid 1",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			file := filepath.Join(t.TempDir(), "state.sqlite")
+			db, err := sql.Open("sqlite3", file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			if _, err := db.Exec(test.setup); err != nil {
+				t.Fatal(err)
+			}
+			mapper, err := newPathMapper("linux", map[string]string{"/home/source": t.TempDir()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = translateDatabase(context.Background(), file, mapper)
+			if err == nil || !strings.Contains(err.Error(), test.wantContext) {
+				t.Fatalf("expected %q context, got %v", test.wantContext, err)
+			}
+			switch test.name {
+			case "invalid JSON":
+				var syntaxError *json.SyntaxError
+				if !errors.As(err, &syntaxError) {
+					t.Fatalf("JSON error chain lost: %v", err)
+				}
+			case "rejected update":
+				var sqliteError *sqlite3.Error
+				if !errors.As(err, &sqliteError) {
+					t.Fatalf("SQLite error chain lost: %v", err)
+				}
+				var path string
+				if err := db.QueryRow("SELECT path FROM project_roots").Scan(&path); err != nil {
+					t.Fatal(err)
+				}
+				if path != "/home/source/project" {
+					t.Fatalf("failed translation changed source path: %q", path)
+				}
+			}
+		})
+	}
+}
 
 // TestDatabaseURI preserves native filenames and prevents special characters from becoming URI options.
 func TestDatabaseURI(t *testing.T) {
