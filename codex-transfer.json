@@ -1,0 +1,21 @@
+{
+    "version": "0.1.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/Waterkyuu/codex-transfer/releases/download/v0.1.0/codex-transfer_0.1.0_windows_amd64.zip",
+            "bin": [
+                "codex-transfer.exe"
+            ],
+            "hash": "f8796ecb2119d97b83fdea9e0e46eef5a325331b7df4d78561d86dd3f70826d6"
+        },
+        "arm64": {
+            "url": "https://github.com/Waterkyuu/codex-transfer/releases/download/v0.1.0/codex-transfer_0.1.0_windows_arm64.zip",
+            "bin": [
+                "codex-transfer.exe"
+            ],
+            "hash": "2a698ef9a49d4e001915e59eb26eacb0814b671d753d43999ae154406526f2eb"
+        }
+    },
+    "homepage": "https://github.com/Waterkyuu/codex-transfer",
+    "description": "Transfer local Codex data between computers over an encrypted IP connection"
+}
