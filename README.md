@@ -219,6 +219,60 @@ codex-transfer send 192.168.1.20 --extra project-data=/absolute/source
 
 Repeat `--extra` and `--map` for multiple roots. Names must match between computers and paths must not overlap. Use `--codex-home` or `--sqlite-home` to select custom Codex state locations.
 
+## Inspect and clear conversation storage
+
+List conversation storage grouped by full workspace path:
+
+```sh
+codex-transfer workspaces
+codex-transfer workspaces --details
+```
+
+The table shows conversation counts, rollout file counts, exact bytes, and MiB, plus a grand total.
+It includes active and archived `.jsonl` and `.jsonl.zst` files; compressed files contribute their
+compressed size. Every physical rollout counts toward storage, including older copies of the same
+conversation. Workspace grouping uses the Codex state database's current `cwd`, falling back to
+the initial rollout metadata for unindexed conversations. Database-only conversations are included
+with zero rollout bytes. The totals exclude database storage, credentials, caches, and project files.
+Listing is read-only and does not require quitting Codex. Workspaces without stored conversations
+are not listed. `--details` exposes the session IDs used for individual selection.
+
+Quit Codex Desktop, CLI, IDE extensions, and daemons before clearing conversations. Preview a
+selection with `--dry-run`, then run the same command without that flag to delete it:
+
+```sh
+# Preview all conversations in one project.
+codex-transfer clear-sessions --workspace /absolute/project/path --dry-run
+
+# Select one or more projects using the full paths from the workspace table.
+codex-transfer clear-sessions --workspace /absolute/project/path --workspace /absolute/other/project
+
+# Select individual conversations using IDs from workspaces --details.
+codex-transfer clear-sessions --session SESSION_ID --session OTHER_SESSION_ID
+
+# Clear all conversations, including archived conversations and database-only entries.
+codex-transfer clear-sessions --all
+```
+
+Repeated `--workspace` and `--session` selections form a union. Unknown selections are rejected;
+`--all` cannot be combined with either selector. Every deletion shows its scope and requires
+two explicit responses: `yes`, then `DELETE`. There is no flag to bypass either confirmation.
+Declining, missing input, or cancelling before installation leaves live data unchanged.
+
+Clearing removes selected rollout files, matching `threads` records and foreign-key cascades,
+and matching records in `history.jsonl` and `session_index.jsonl`. Project files, workspace
+registrations, credentials, configuration, and unrelated conversations are retained. Restart
+Codex after clearing to refresh its project and recent conversation lists. This clears local
+stored history only; it does not delete cloud conversations or separate migration backups.
+
+The operation prepares private copies of the Codex root and any separate SQLite root, then
+installs them together with rollback on failure. Allow enough free space for those copies.
+Temporary backups are removed after a successful installation, so deletion is permanent.
+If backup cleanup fails, the error identifies the retained backup. Unsupported database versions,
+invalid metadata, symbolic session paths, and unsupported foreign-key dependencies stop deletion
+before installation. These commands support the same `state_5.sqlite` contract as session merging.
+Use `--codex-home` and `--sqlite-home` with either command for custom data locations.
+
 ## Commands
 
 | Command | Purpose |
@@ -226,6 +280,8 @@ Repeat `--extra` and `--map` for multiple roots. Names must match between comput
 | `address` | Show local IP addresses and connection examples. |
 | `paths --all` | Show all conventional data roots, including missing locations. |
 | `check` | Check local Codex shutdown and data availability. |
+| `workspaces [--details]` | Show conversation file sizes per workspace and optional session IDs. |
+| `clear-sessions` | Clear selected or all conversations after two confirmations. |
 | `receive` | Wait for one approved transfer and install the received data. |
 | `send <ip>` | Send selected local data to the receiving computer. |
 | `--version` | Show the installed version. |
