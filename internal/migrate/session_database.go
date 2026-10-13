@@ -87,7 +87,7 @@ func sessionStateDatabase(directory string) (string, error) {
 	return selected, nil
 }
 
-// sessionSQLiteHome respects explicit roots, then Codex configuration, then the Codex root itself.
+// sessionSQLiteHome resolves explicit overrides, configuration, environment, then the Codex root.
 func sessionSQLiteHome(codexHome, override string) (string, error) {
 	if override != "" {
 		return filepath.Abs(override)
@@ -97,6 +97,9 @@ func sessionSQLiteHome(codexHome, override string) (string, error) {
 		return "", err
 	}
 	if directory := configured["sqlite_home"]; directory != "" {
+		return filepath.Abs(directory)
+	}
+	if directory := os.Getenv("CODEX_SQLITE_HOME"); directory != "" {
 		return filepath.Abs(directory)
 	}
 	return filepath.Abs(codexHome)
@@ -179,7 +182,12 @@ func stagedSessionDatabases(staged *installation) ([]string, error) {
 		return nil, err
 	}
 	relative := "."
-	if configuredHome := configured["sqlite_home"]; configuredHome != "" {
+	configuredHome := staged.sqliteHome
+	if configuredHome == "" {
+		configuredHome = configured["sqlite_home"]
+	}
+	// A resolved override is a live path; translate it into the clone instead of reopening the live database.
+	if configuredHome != "" {
 		absolute, err := filepath.Abs(configuredHome)
 		if err != nil {
 			return nil, err

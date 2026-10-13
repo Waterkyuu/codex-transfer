@@ -78,6 +78,7 @@ func (a *application) migration(ctx context.Context, command string, args []stri
 			Workers:     options.workers,
 			Compression: options.compression,
 			Filter:      options.filter,
+			SQLiteHome:  options.sqliteHome,
 		}
 		return sender.Send(ctx, address)
 	}
@@ -101,7 +102,7 @@ func (a *application) migration(ctx context.Context, command string, args []stri
 	receiver := &migrate.Receiver{
 		Targets: targets, Output: a.output, MaxBytes: options.maxGiB * (1 << 30),
 		Confirm: a.confirm, Check: guard, Overrides: overrides, PathMappings: pathMappings,
-		ImportRoot: options.importRoot, Workers: options.workers,
+		ImportRoot: options.importRoot, Workers: options.workers, SQLiteHome: options.sqliteHome,
 	}
 	if err := receiver.Prepare(); err != nil {
 		return err

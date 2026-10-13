@@ -34,6 +34,8 @@ type Sender struct {
 	Workers int
 	// Compression selects fast, balanced, best, or none; the default favors throughput.
 	Compression string
+	// SQLiteHome selects source state independently of whether it needs a separate transfer root.
+	SQLiteHome string
 	// Filter selects session-only merging; nil retains complete root migration.
 	Filter *SessionFilter
 }
@@ -63,9 +65,9 @@ func (s *Sender) Send(ctx context.Context, address string) error {
 	var err error
 	if s.Filter != nil {
 		roots = []Root{}
-		sqliteHome := ""
+		sqliteHome := s.SQLiteHome
 		for _, root := range s.Roots {
-			if root.Name == "sqlite" {
+			if root.Name == "sqlite" && sqliteHome == "" {
 				sqliteHome = root.Path
 			}
 			if root.Name == "codex" {

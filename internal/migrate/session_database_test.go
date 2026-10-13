@@ -159,3 +159,38 @@ func TestStagedSessionDatabaseScope(t *testing.T) {
 		t.Fatalf("active state database = %v, %v", files, err)
 	}
 }
+
+// TestSessionSQLiteHomePrecedence resolves internal directories independently of transfer roots.
+func TestSessionSQLiteHomePrecedence(t *testing.T) {
+	for _, mode := range []string{"default", "environment", "configuration", "explicit"} {
+		t.Run(mode, func(t *testing.T) {
+			home := t.TempDir()
+			environment := filepath.Join(home, "environment")
+			configured := filepath.Join(home, "configured")
+			explicit := filepath.Join(home, "explicit")
+			t.Setenv("CODEX_SQLITE_HOME", "")
+			want, override := home, ""
+			if mode != "default" {
+				t.Setenv("CODEX_SQLITE_HOME", environment)
+				want = environment
+			}
+			if mode == "configuration" || mode == "explicit" {
+				if err := os.WriteFile(
+					filepath.Join(home, "config.toml"),
+					[]byte("sqlite_home = "+tomlPath(configured)+"\n"),
+					0600,
+				); err != nil {
+					t.Fatal(err)
+				}
+				want = configured
+			}
+			if mode == "explicit" {
+				override, want = explicit, explicit
+			}
+			got, err := sessionSQLiteHome(home, override)
+			if err != nil || got != want {
+				t.Fatalf("SQLite home = %s, %v; want %s", got, err, want)
+			}
+		})
+	}
+}

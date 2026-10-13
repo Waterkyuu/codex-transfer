@@ -20,6 +20,8 @@ import (
 type Receiver struct {
 	// Targets maps allowed wire names to destinations selected only by this machine.
 	Targets map[string]string
+	// SQLiteHome selects local session state independently of separate destination roots.
+	SQLiteHome string
 	// Output receives pairing, transfer, validation, and backup status.
 	Output io.Writer
 	// MaxBytes bounds archive storage and extracted regular file payloads.
@@ -38,6 +40,8 @@ type Receiver struct {
 	PathMappings map[string]string
 	// Workers selects CPU workers for decompression and independent metadata files.
 	Workers int
+	// sqliteHome retains the resolved local database directory for the validated session offer.
+	sqliteHome string
 	// certificate is ephemeral and never written to disk.
 	certificate tls.Certificate
 	// fingerprint is the full SHA-256 digest of the prepared certificate.
@@ -182,6 +186,7 @@ func (r *Receiver) receive(ctx context.Context, connection *tls.Conn) error {
 		return err
 	}
 	defer installation.close()
+	installation.sqliteHome = r.sqliteHome
 	archiveDirectory := installation.items[0].slot
 	if plan.cross {
 		archiveDirectory, err = installation.resolve(sourceArchiveRoot)
@@ -335,11 +340,25 @@ func (r *Receiver) validateOffer(hello message) (*receivePlan, error) {
 		return nil, err
 	}
 	if hello.Mode == "sessions" {
-		target := r.Targets["sqlite"]
-		if override := r.Overrides["sqlite"]; override != "" {
-			target = override
+		codexHome := ""
+		for _, root := range plan.roots {
+			if root.Name == "codex" {
+				codexHome = root.Path
+			}
 		}
-		if target != "" {
+		override := r.SQLiteHome
+		if override == "" {
+			override = r.Overrides["sqlite"]
+		}
+		if override == "" {
+			override = r.Targets["sqlite"]
+		}
+		// Internal overrides need no separate root, but still select the database used for session merging.
+		target, err := sessionSQLiteHome(codexHome, override)
+		if err != nil {
+			return nil, err
+		}
+		if !within(codexHome, target) {
 			if _, err := os.Lstat(target); err == nil {
 				plan.roots = append(plan.roots, Root{Name: "sqlite", Path: target})
 			} else if !errors.Is(err, os.ErrNotExist) {
@@ -349,6 +368,7 @@ func (r *Receiver) validateOffer(hello message) (*receivePlan, error) {
 		if err := ValidateRoots(plan.roots); err != nil {
 			return nil, err
 		}
+		r.sqliteHome = target
 	}
 	if plan.cross && (hello.Home == "" || len(hello.Paths) != len(hello.Roots)) {
 		return nil, errors.New("cross-system migration requires complete source path metadata")

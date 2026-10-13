@@ -11,6 +11,8 @@ import (
 type installation struct {
 	// items retain deterministic replacement order and rollback state.
 	items []*installItem
+	// sqliteHome is the receiver-selected live SQLite directory mapped into private staging for session imports.
+	sqliteHome string
 	// closed makes cleanup idempotent without removing another operation's later lock.
 	closed bool
 }
