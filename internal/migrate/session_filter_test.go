@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -36,6 +37,43 @@ func writeSessionFixture(t *testing.T, home, relative, id, timestamp, cwd string
 		t.Fatal(err)
 	}
 	return file
+}
+
+// TestSessionSelectionResolvesRootAliases uses current-file identity when the database stores an aliased root path.
+func TestSessionSelectionResolvesRootAliases(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("this fixture requires unprivileged symbolic directory creation")
+	}
+	home := t.TempDir()
+	writeSessionFixture(t, home, "sessions/original.jsonl", "thread", "2026-10-01T00:00:00Z", "/dev/app")
+	current := writeSessionFixture(t, home, "sessions/current.jsonl.zst", "thread", "2026-10-01T00:00:00Z", "/dev/app")
+	alias := filepath.Join(t.TempDir(), "codex")
+	if err := os.Symlink(home, alias); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite3", filepath.Join(home, "state_5.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("CREATE TABLE threads(id TEXT, rollout_path TEXT)"); err != nil {
+		t.Fatal(err)
+	}
+	// The pointer retains both its root alias and its pre-compression plain filename.
+	if _, err := db.Exec(
+		"INSERT INTO threads VALUES(?, ?)",
+		"thread",
+		filepath.Join(alias, "sessions", "current.jsonl"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	filter, _ := NewSessionFilter("2026-10-01", "", nil, nil)
+	selected, _, err := filter.selectFiles(context.Background(), home, "")
+	if err != nil || selected[current] == nil {
+		t.Fatalf("aliased current rollout missing: %v, %v", selected, err)
+	}
 }
 
 // TestSessionFilter applies inclusive UTC dates and case-sensitive project conditions together.

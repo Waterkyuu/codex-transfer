@@ -39,6 +39,12 @@ type sessionMetadata struct {
 	CWD string `json:"cwd"`
 	// HistoryMode detects rollouts whose conversation content depends on an external database.
 	HistoryMode string `json:"history_mode"`
+	// Source preserves the originating CLI, IDE, or subagent classification for the receiving index.
+	Source json.RawMessage `json:"source"`
+	// ModelProvider identifies the provider required to resume the conversation.
+	ModelProvider string `json:"model_provider"`
+	// CLIVersion records which Codex version originally created the rollout.
+	CLIVersion string `json:"cli_version"`
 }
 
 // sessionCandidate retains matching inputs until the current rollout for its stable conversation ID is resolved.
@@ -68,10 +74,25 @@ func currentSessionCandidate(candidates []sessionCandidate, active string) (sess
 			return candidate, nil
 		}
 	}
-	// Codex may compress the current file without updating its stored plain-path pointer.
-	for _, candidate := range candidates {
-		if strings.TrimSuffix(candidate.file, ".zst") == strings.TrimSuffix(active, ".zst") {
-			return candidate, nil
+	reference := active
+	info, err := os.Stat(reference)
+	if errors.Is(err, os.ErrNotExist) {
+		// Codex may compress the current file without updating its stored plain-path pointer.
+		reference = strings.TrimSuffix(active, ".zst")
+		if reference == active {
+			reference += ".zst"
+		}
+		info, err = os.Stat(reference)
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return sessionCandidate{}, fmt.Errorf("read current source rollout: %w", err)
+	}
+	if err == nil {
+		// Root aliases and Windows case differences can name the same current file; compare filesystem identity.
+		for _, candidate := range candidates {
+			if os.SameFile(candidate.info, info) {
+				return candidate, nil
+			}
 		}
 	}
 	return sessionCandidate{}, fmt.Errorf("current rollout for session %s is missing from source trees",
@@ -133,23 +154,32 @@ func (f *SessionFilter) matches(meta sessionMetadata) (bool, error) {
 	return prefixMatch && containsMatch, nil
 }
 
-// readSessionMetadata bounds first-record decoding and supports plain and Zstandard rollouts.
-func readSessionMetadata(ctx context.Context, file string) (sessionMetadata, error) {
+// openSessionReader owns a bounded plain or Zstandard rollout reader until the returned cleanup is called.
+func openSessionReader(ctx context.Context, file string) (io.Reader, func(), error) {
 	// #nosec G304 G122 -- Callers verify a regular file in an offline source or private staging tree.
 	input, err := os.Open(file)
 	if err != nil {
-		return sessionMetadata{}, err
+		return nil, nil, err
 	}
-	defer func() { _ = input.Close() }()
 	var reader io.Reader = contextReader{ctx: ctx, reader: input}
 	if strings.HasSuffix(file, ".zst") {
 		decoder, err := zstd.NewReader(reader, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(64<<20))
 		if err != nil {
-			return sessionMetadata{}, err
+			_ = input.Close()
+			return nil, nil, err
 		}
-		defer decoder.Close()
-		reader = decoder
+		return decoder, func() { decoder.Close(); _ = input.Close() }, nil
 	}
+	return reader, func() { _ = input.Close() }, nil
+}
+
+// readSessionMetadata bounds first-record decoding and supports plain and Zstandard rollouts.
+func readSessionMetadata(ctx context.Context, file string) (sessionMetadata, error) {
+	reader, closeReader, err := openSessionReader(ctx, file)
+	if err != nil {
+		return sessionMetadata{}, err
+	}
+	defer closeReader()
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64<<10), 16<<20)
 	if !scanner.Scan() {
