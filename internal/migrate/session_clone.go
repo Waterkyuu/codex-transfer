@@ -10,16 +10,16 @@ import (
 	"path/filepath"
 )
 
-// cloneSessionTarget copies receiving state using native paths without applying network archive restrictions.
-func cloneSessionTarget(ctx context.Context, item *installItem) error {
+// cloneSessionTarget copies native receiving state and returns the live snapshot verified during copying.
+func cloneSessionTarget(ctx context.Context, item *installItem) (map[string]fs.FileInfo, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 	destination := filepath.Join(item.slot, "data")
 	if _, err := os.Lstat(item.target); errors.Is(err, os.ErrNotExist) {
-		return os.Mkdir(destination, 0700)
+		return map[string]fs.FileInfo{}, os.Mkdir(destination, 0700)
 	} else if err != nil {
-		return err
+		return nil, err
 	}
 	before := map[string]fs.FileInfo{}
 	directories := []string{}
@@ -59,20 +59,49 @@ func cloneSessionTarget(ctx context.Context, item *installItem) error {
 		}
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
+	if err := validateSessionTarget(ctx, item.target, before); err != nil {
+		return nil, err
+	}
+	// Restore restrictive directory permissions after children are copied, deepest directories first.
+	for index := len(directories) - 1; index >= 0; index-- {
+		source := directories[index]
+		relative, err := filepath.Rel(item.target, source)
+		if err != nil {
+			return nil, err
+		}
+		target := filepath.Join(destination, relative)
+		info := before[source]
+		if err := os.Chtimes(target, info.ModTime(), info.ModTime()); err != nil {
+			return nil, err
+		}
+		if err := os.Chmod(target, info.Mode().Perm()); err != nil {
+			return nil, err
+		}
+	}
+	return before, ctx.Err()
+}
+
+// validateSessionTarget rejects changes to any copied live entry before its entire root can be replaced.
+func validateSessionTarget(ctx context.Context, target string, before map[string]fs.FileInfo) error {
 	seen := 0
-	err = filepath.WalkDir(item.target, func(source string, _ fs.DirEntry, walkErr error) error {
+	err := filepath.WalkDir(target, func(source string, _ fs.DirEntry, walkErr error) error {
+		// A previously missing root is unchanged only while it remains absent.
+		if source == target && len(before) == 0 && errors.Is(walkErr, os.ErrNotExist) {
+			return ctx.Err()
+		}
 		if err := errors.Join(ctx.Err(), walkErr); err != nil {
 			return err
 		}
+		// Query the live path on every platform, avoiding cached Windows directory metadata.
 		info, err := os.Lstat(source)
 		if err != nil {
 			return err
 		}
 		previous, exists := before[source]
 		if !exists || !sameSessionFileState(previous, info) {
-			return fmt.Errorf("receiving data changed during clone: %s", source)
+			return fmt.Errorf("receiving data changed since clone: %s", source)
 		}
 		seen++
 		return nil
@@ -81,23 +110,7 @@ func cloneSessionTarget(ctx context.Context, item *installItem) error {
 		return err
 	}
 	if seen != len(before) {
-		return errors.New("receiving entries removed during clone")
-	}
-	// Restore restrictive directory permissions after children are copied, deepest directories first.
-	for index := len(directories) - 1; index >= 0; index-- {
-		source := directories[index]
-		relative, err := filepath.Rel(item.target, source)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(destination, relative)
-		info := before[source]
-		if err := os.Chtimes(target, info.ModTime(), info.ModTime()); err != nil {
-			return err
-		}
-		if err := os.Chmod(target, info.Mode().Perm()); err != nil {
-			return err
-		}
+		return errors.New("receiving entries removed since clone")
 	}
 	return ctx.Err()
 }

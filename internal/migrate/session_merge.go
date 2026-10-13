@@ -172,7 +172,7 @@ func mergeSessionInstallation(ctx context.Context, installation *installation, o
 	}
 	for _, item := range installation.items {
 		if item.name == "codex" || item.name == "sqlite" {
-			if err := cloneSessionTarget(ctx, item); err != nil {
+			if _, err := cloneSessionTarget(ctx, item); err != nil {
 				return err
 			}
 		}

@@ -26,7 +26,7 @@ func TestCloneSessionTargetNestedDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer i.close()
-	if err := cloneSessionTarget(context.Background(), i.items[0]); err != nil {
+	if _, err := cloneSessionTarget(context.Background(), i.items[0]); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"sessions/2026/10/13", "archived_sessions", "worktrees/project/testdata"} {
@@ -56,7 +56,7 @@ func TestCloneSessionTargetPreservesNativeNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer i.close()
-	if err := cloneSessionTarget(context.Background(), i.items[0]); err != nil {
+	if _, err := cloneSessionTarget(context.Background(), i.items[0]); err != nil {
 		t.Fatal(err)
 	}
 	staged := filepath.Join(i.items[0].slot, "data")
@@ -88,7 +88,7 @@ func TestCloneSessionTargetCancellation(t *testing.T) {
 	defer i.close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := cloneSessionTarget(ctx, i.items[0]); !errors.Is(err, context.Canceled) {
+	if _, err := cloneSessionTarget(ctx, i.items[0]); !errors.Is(err, context.Canceled) {
 		t.Fatalf("clone cancellation: %v", err)
 	}
 	if data, err := os.ReadFile(filepath.Join(target, "keep")); err != nil || string(data) != "local" {

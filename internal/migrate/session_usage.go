@@ -154,10 +154,13 @@ func ClearSessions(ctx context.Context, home, sqliteHome string, selected []Sess
 	}
 	defer staged.close()
 	staged.sqliteHome = directory
+	snapshots := make([]map[string]fs.FileInfo, 0, len(staged.items))
 	for _, item := range staged.items {
-		if err := cloneSessionTarget(ctx, item); err != nil {
+		snapshot, err := cloneSessionTarget(ctx, item)
+		if err != nil {
 			return err
 		}
+		snapshots = append(snapshots, snapshot)
 	}
 	data, err := staged.resolve("codex")
 	if err != nil {
@@ -207,6 +210,12 @@ func ClearSessions(ctx context.Context, home, sqliteHome string, selected []Sess
 	}
 	if err := validateSessionReferences(selected, current); err != nil {
 		return err
+	}
+	// Replacing a whole root can otherwise overwrite post-clone edits to configuration or unselected histories.
+	for index, item := range staged.items {
+		if err := validateSessionTarget(ctx, item.target, snapshots[index]); err != nil {
+			return err
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return err
