@@ -45,7 +45,8 @@ export function verifyChecksum(archive, expected) {
 
 // download bounds release fetches and reports inaccessible or unpublished releases explicitly.
 async function download(url, fetch) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(60_000), redirect: 'follow' });
+  // Release archives can take more than a minute over a slow international connection.
+  const response = await fetch(url, { signal: AbortSignal.timeout(300_000), redirect: 'follow' });
   if (!response.ok) { throw new Error(`Download failed (${response.status}): ${url}; a reachable published release is required`); }
   return Buffer.from(await response.arrayBuffer());
 }
