@@ -16,6 +16,47 @@
 
 `receive --max-gib 1024` defaults to a 1 TiB archive limit and can be adjusted. Allow additional disk space for the entire archive and extracted data; original destination backups remain. The sender needs enough system temporary-directory space for a complete compressed snapshot (uncompressed with `--compression none`).
 
+## Selective session imports
+
+Supplying a date or project selection flag enables session merging. For example:
+
+```sh
+codex-transfer receive --sqlite-home /home/bob/.codex/sqlite
+codex-transfer send 192.168.1.20 --sqlite-home /home/alice/.codex/sqlite --since 2026-10-01
+```
+
+Each endpoint independently resolves SQLite home using `--sqlite-home`, top-level `sqlite_home` in
+`config.toml`, `CODEX_SQLITE_HOME`, then the Codex root. An internal directory is included through the
+Codex root, while an external directory requires a separate SQLite root. The resolved location is
+retained in both cases. The receiver translates that local location into its private clone before
+reading identities or registering new sessions; it never writes to the live database before installation.
+
+Selective imports support Codex versions that use the exact filename `state_5.sqlite`, consistent with
+[Codex's state database filename contract](https://github.com/openai/codex/blob/main/codex-rs/state/src/sqlite.rs).
+Discovery only examines direct children of the resolved SQLite home. Older state files alongside
+`state_5.sqlite`, worktree fixtures, and backup subdirectories are excluded. A higher numbered state
+file, a noncanonical version-5 filename, or only older state files causes an explicit failure. Database
+numbering and schema compatibility do not identify which Codex version is running. Both endpoints must
+use compatible Codex versions; initialize a version using `state_5.sqlite` or use full migration for an
+unsupported layout. Full migration does not use this selective-import database rule.
+
+With no state database, the sender accepts only one rollout per session ID and rejects ambiguous
+histories. The receiver leaves index initialization to Codex on startup. With a supported database,
+the sender uses its current rollout pointers and the receiver inserts only new thread IDs, preserving
+existing rows and completed discovery markers. Unknown required columns or unfinished discovery stop
+the merge before installation.
+
+Local receiving symlinks beneath `sessions/` and `archived_sessions/` are retained and skipped when their
+names do not end in `.jsonl` or `.jsonl.zst`. This includes dangling links and links to directories; their
+targets are never traversed. Rollout-named links, symbolic session tree roots, symbolic SQLite directories
+and sidecars, and symbolic ancestors of incoming rollout destinations remain rejected. Source session
+selection and incoming session archives continue to reject symlinks.
+
+Regression tests cover both CLI endpoints, configuration precedence, internal SQLite directories with
+decoy databases, unsupported database layouts, and retained receiving links. These tests use synthetic
+fixtures and do not establish discovery or resume behavior after a real Codex restart. Restart a compatible
+Codex version after migration and verify the imported conversations.
+
 ## Default data roots
 
 | Name | Default location |

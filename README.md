@@ -165,20 +165,28 @@ configuration, databases, workspaces, and other roots are excluded; `--extra` ca
 session selection. Database-only source metadata, such as custom titles and pinning, is not imported.
 Database-backed paginated histories require full migration and are rejected by session selection.
 Invalid metadata or an empty selection stops the sender before connecting.
-The source's current rollout pointers are read from the resolved SQLite home. When a session has multiple
+Both endpoints resolve SQLite home using `--sqlite-home`, top-level `sqlite_home` in `config.toml`,
+`CODEX_SQLITE_HOME`, then the Codex root, in that order. Internal directories such as `.codex/sqlite`
+retain their selection without adding an overlapping transfer root. The source's current rollout pointers
+are read from this resolved directory. When a session has multiple
 rollouts and its current file cannot be determined, selection stops instead of guessing from filenames.
 
 Receiving conversations and settings are retained. Duplicate **session IDs** keep the receiving version,
 even if filenames or archived status differ. A path collision between different IDs aborts the merge
 without changing live data. The merge uses private staging and backs up the receiving Codex root and any
 separate SQLite root before installation. Allow disk space for the received archive, local staging copies, and backups.
-Database discovery is restricted to the resolved SQLite home and the highest numbered state database there;
-worktree fixtures, backup subdirectories, and older state versions are excluded. New sessions are registered
+Session selection and merging support Codex versions that use `state_5.sqlite`. Only that exact filename
+in the resolved SQLite home is used; older state files alongside it, worktree fixtures, and backup
+subdirectories are excluded. A higher numbered state file or only older state files stops the operation;
+the tool does not infer the active database from numbering. Initialize a compatible Codex version or use
+full migration for an unsupported layout. New sessions are registered
 with insert-only statements in the staged database; existing thread rows and discovery markers remain unchanged.
 If the receiving database has an unknown required thread column or unfinished discovery, the merge stops before
 installation. Complete initialization in Codex before retrying, or use full migration for an unsupported schema.
 If no receiving state database exists, Codex initializes its index on startup. Restart Codex after completion.
-Symbolic SQLite directories in staged receiving data are rejected; use `receive --sqlite-home /real/path`
+Unrelated symlinks inside receiving session trees are retained and skipped without reading their targets.
+Links named `*.jsonl` or `*.jsonl.zst`, symbolic session tree roots, and symbolic SQLite directories or sidecars
+are rejected. Incoming session archives cannot contain symlinks. Use `receive --sqlite-home /real/path`
 to include the actual SQLite directory as a separate root.
 
 ### Use a different port or wait longer

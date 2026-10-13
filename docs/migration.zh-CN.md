@@ -16,6 +16,25 @@
 
 `receive --max-gib 1024` 默认将归档限制为 1 TiB，可修改。接收前需要为整个归档和解压后的数据留出额外磁盘空间；原目标备份会保留。源端需要能在系统临时目录容纳完整压缩快照（`--compression none` 时为未压缩快照）。
 
+## 筛选会话导入
+
+提供日期或项目筛选参数时启用会话合并。例如：
+
+```sh
+codex-transfer receive --sqlite-home /home/bob/.codex/sqlite
+codex-transfer send 192.168.1.20 --sqlite-home /home/alice/.codex/sqlite --since 2026-10-01
+```
+
+两端独立按 `--sqlite-home`、`config.toml` 顶层 `sqlite_home`、`CODEX_SQLITE_HOME`、Codex 数据根的优先级解析 SQLite 目录。内部目录通过 Codex 数据根纳入迁移，外部目录需要独立 SQLite 数据根；两种情况均保留解析后的目录位置。接收端将该本地位置映射到私有副本，再读取已有会话 ID 和注册新会话；安装前不会写入活动数据库。
+
+筛选导入仅支持使用精确文件名 `state_5.sqlite` 的 Codex 版本，与 [Codex 状态数据库文件名约定](https://github.com/openai/codex/blob/main/codex-rs/state/src/sqlite.rs) 一致。查找只检查实际 SQLite 目录的直接子项。同目录中与 `state_5.sqlite` 共存的旧库、工作树测试库和备份子目录不参与选择。存在更高编号状态库、非规范的版本 5 文件名或只有旧库时，操作会明确失败。数据库编号和 schema 兼容性不能确认当前运行的 Codex 版本。两端必须使用兼容版本；不支持的布局需要先初始化使用 `state_5.sqlite` 的版本，或使用完整迁移。完整迁移不采用此筛选导入数据库规则。
+
+没有状态数据库时，发送端仅接受每个会话 ID 对应一个 rollout，拒绝有歧义的历史；接收端由 Codex 启动时初始化索引。有受支持数据库时，发送端使用当前 rollout 指针，接收端只插入新会话 ID，保留已有记录和已完成的发现标记。未知必填字段或尚未完成的发现状态会在安装前中止合并。
+
+接收端 `sessions/` 和 `archived_sessions/` 内名称不以 `.jsonl` 或 `.jsonl.zst` 结尾的本地符号链接会保留并跳过，包括悬空链接和目录链接，不遍历其目标。rollout 名称的链接、会话目录本身的链接、SQLite 目录及旁路文件的链接，以及传入 rollout 目标的符号链接祖先仍会被拒绝。源端会话筛选和传入会话归档继续拒绝符号链接。
+
+回归测试覆盖两端 CLI、配置优先级、存在干扰数据库的内部 SQLite 目录、不支持的数据库布局和接收端链接保留。测试使用合成数据，不能证明真实 Codex 重启后的发现和恢复行为。迁移后应重启兼容的 Codex 版本并核对导入会话。
+
 ## 默认数据根
 
 | 名称 | 默认位置 |
