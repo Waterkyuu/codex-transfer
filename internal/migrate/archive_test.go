@@ -5,12 +5,50 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"syscall"
 	"testing"
 )
+
+// TestSelectedSnapshotNestedDirectories compares live metadata for freshly populated sparse archive ancestors.
+func TestSelectedSnapshotNestedDirectories(t *testing.T) {
+	source := t.TempDir()
+	directory := filepath.Join(source, "sessions", "2026", "10", "13")
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(directory, "current.jsonl")
+	if err := os.WriteFile(file, []byte("selected rollout"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	selected := map[string]fs.FileInfo{}
+	for current := file; ; current = filepath.Dir(current) {
+		info, err := os.Lstat(current)
+		if err != nil {
+			t.Fatal(err)
+		}
+		selected[current] = info
+		if current == source {
+			break
+		}
+	}
+	bundle, err := snapshotFiles(context.Background(), []Root{{Name: "codex", Path: source}}, 0, "none", selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bundle.Close()
+	destination := t.TempDir()
+	if err := Extract(bundle.File, destination, bundle.Size); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(destination, "codex", "sessions", "2026", "10", "13", "current.jsonl"))
+	if err != nil || string(data) != "selected rollout" {
+		t.Fatalf("selected snapshot changed: %q, %v", data, err)
+	}
+}
 
 // TestArchiveRoundTrip verifies hidden files, empty directories, links, and private permissions.
 func TestArchiveRoundTrip(t *testing.T) {

@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -9,6 +10,56 @@ import (
 	"strings"
 	"testing"
 )
+
+// TestRuntimeWorkspaceRootsTranslation maps native resume metadata without changing conversation content.
+func TestRuntimeWorkspaceRootsTranslation(t *testing.T) {
+	for _, sourceOS := range []string{"windows", "darwin", "linux"} {
+		t.Run(sourceOS, func(t *testing.T) {
+			home := "/home/source"
+			if sourceOS == "windows" {
+				home = `C:\Users\source`
+			}
+			local := t.TempDir()
+			mapper, err := newPathMapper(sourceOS, map[string]string{home: local})
+			if err != nil {
+				t.Fatal(err)
+			}
+			root := home + "/app-api"
+			metadata, err := json.Marshal(map[string]any{
+				"type": "session_meta", "payload": map[string]any{
+					"cwd": root, "runtime_workspace_roots": []string{root},
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			message := `{"type":"event_msg","payload":{"message":"runtime_workspace_roots must stay in conversation text"}}`
+			var output bytes.Buffer
+			if err := translateRollouts(
+				strings.NewReader(string(metadata)+"\n"+message+"\n"),
+				&output,
+				mapper,
+			); err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(strings.TrimSuffix(output.String(), "\n"), "\n")
+			var result struct {
+				// Payload retains the native fields used to restore workspace roots on resume.
+				Payload struct {
+					// Roots must point to the receiving workspace rather than a foreign absolute path.
+					Roots []string `json:"runtime_workspace_roots"`
+				} `json:"payload"`
+			}
+			if err := json.Unmarshal([]byte(lines[0]), &result); err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Payload.Roots) != 1 || result.Payload.Roots[0] != filepath.Join(local, "app-api") ||
+				lines[1] != message {
+				t.Fatalf("native resume metadata or conversation changed: %s", output.String())
+			}
+		})
+	}
+}
 
 // TestJSONTranslationFraming rejects extra values and preserves malformed trailing input errors.
 func TestJSONTranslationFraming(t *testing.T) {

@@ -7,6 +7,9 @@ on:
 permissions:
   contents: read
 jobs:
+  real-e2e:
+    name: Real Codex on macOS, Windows, and Linux
+    uses: ./.github/workflows/real-e2e.yml
   lint:
     name: GolangCI lint and format
     runs-on: ubuntu-latest

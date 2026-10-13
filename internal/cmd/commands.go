@@ -77,6 +77,8 @@ func (a *application) migration(ctx context.Context, command string, args []stri
 			Wait:        options.wait,
 			Workers:     options.workers,
 			Compression: options.compression,
+			Filter:      options.filter,
+			SQLiteHome:  options.sqliteHome,
 		}
 		return sender.Send(ctx, address)
 	}
@@ -100,7 +102,7 @@ func (a *application) migration(ctx context.Context, command string, args []stri
 	receiver := &migrate.Receiver{
 		Targets: targets, Output: a.output, MaxBytes: options.maxGiB * (1 << 30),
 		Confirm: a.confirm, Check: guard, Overrides: overrides, PathMappings: pathMappings,
-		ImportRoot: options.importRoot, Workers: options.workers,
+		ImportRoot: options.importRoot, Workers: options.workers, SQLiteHome: options.sqliteHome,
 	}
 	if err := receiver.Prepare(); err != nil {
 		return err
@@ -112,7 +114,7 @@ func (a *application) migration(ctx context.Context, command string, args []stri
 	defer func() { _ = listener.Close() }()
 	_, _ = fmt.Fprintln(
 		a.output,
-		"Destination roots offered by the sender will be replaced; existing data will be backed up.",
+		"Full migrations replace offered roots; filtered sessions are merged. Existing data will be backed up.",
 	)
 	return receiver.Serve(ctx, listener)
 }

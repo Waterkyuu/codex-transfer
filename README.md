@@ -66,6 +66,7 @@ You can also download a native archive from [Releases](https://github.com/Waterk
 | **Encrypted transfer** | Protect the connection with TLS 1.3 and verify the archive with SHA-256 before installation. |
 | **Backups and recovery** | Keep source data and back up replaced destination roots; roll back ordinary installation failures. |
 | **Custom data locations** | Add external data directories and choose their destinations on the receiving computer. |
+| **Session selection** | Match session creation dates and project-name prefixes or substrings, then merge into existing receiving data. |
 
 ## Quick start
 
@@ -138,6 +139,55 @@ codex-transfer send 192.168.1.20 --workers 0 --compression fast
 `fast` favors throughput; `balanced` and `best` spend more CPU to reduce network bytes. `none` avoids compression overhead for already-compressed files or a very fast local connection. Set `--workers 4` on either terminal to limit parallel processing. Queues are bounded; memory grows with worker count. Progress reports network bytes and speed; the final overall rate also includes preparation and installation. Actual throughput depends on the data, disks, CPU, and network.
 
 ## Choose your connection and data locations
+
+### Transfer matching sessions
+
+Start `codex-transfer receive` on the destination as usual, then select sessions on the source:
+
+```sh
+codex-transfer send 192.168.1.20 --since 2026-10-01 --until 2026-10-13 --project-prefix app-
+codex-transfer send 192.168.1.20 --project-contains api --project-contains backend
+```
+
+Supplying any selection flag enables **session merging**. Both computers need a version that supports it;
+older receivers reject the offer before receiving archive data. Without selection flags, full migration
+continues to replace offered roots and retain backups.
+
+- `--since` and `--until` use inclusive `YYYY-MM-DD` dates in UTC, matched against the creation timestamp
+  in `session_meta`, independently of file modification dates. Either boundary may be omitted.
+- `--project-prefix` and `--project-contains` match the final directory name of the session's initial
+  working directory. Matching is case-sensitive and supports both Unix and Windows path separators.
+- Repeat a project flag to accept any of its values. Different flag categories must all match; for example,
+  a date range plus a prefix plus a substring requires all three conditions.
+
+Only matching active and archived rollouts are sent, including Zstandard rollouts. Source credentials,
+configuration, databases, workspaces, and other roots are excluded; `--extra` cannot be combined with
+session selection. Database-only source metadata, such as custom titles and pinning, is not imported.
+Database-backed paginated histories require full migration and are rejected by session selection.
+Invalid metadata or an empty selection stops the sender before connecting.
+Both endpoints resolve SQLite home using `--sqlite-home`, top-level `sqlite_home` in `config.toml`,
+`CODEX_SQLITE_HOME`, then the Codex root, in that order. Internal directories such as `.codex/sqlite`
+retain their selection without adding an overlapping transfer root. The source's current rollout pointers
+are read from this resolved directory. When a session has multiple
+rollouts and its current file cannot be determined, selection stops instead of guessing from filenames.
+
+Receiving conversations and settings are retained. Duplicate **session IDs** keep the receiving version,
+even if filenames or archived status differ. A path collision between different IDs aborts the merge
+without changing live data. The merge uses private staging and backs up the receiving Codex root and any
+separate SQLite root before installation. Allow disk space for the received archive, local staging copies, and backups.
+Session selection and merging support Codex versions that use `state_5.sqlite`. Only that exact filename
+in the resolved SQLite home is used; older state files alongside it, worktree fixtures, and backup
+subdirectories are excluded. A higher numbered state file or only older state files stops the operation;
+the tool does not infer the active database from numbering. Initialize a compatible Codex version or use
+full migration for an unsupported layout. New sessions are registered
+with insert-only statements in the staged database; existing thread rows and discovery markers remain unchanged.
+If the receiving database has an unknown required thread column or unfinished discovery, the merge stops before
+installation. Complete initialization in Codex before retrying, or use full migration for an unsupported schema.
+If no receiving state database exists, Codex initializes its index on startup. Restart Codex after completion.
+Unrelated symlinks inside receiving session trees are retained and skipped without reading their targets.
+Links named `*.jsonl` or `*.jsonl.zst`, symbolic session tree roots, and symbolic SQLite directories or sidecars
+are rejected. Incoming session archives cannot contain symlinks. Use `receive --sqlite-home /real/path`
+to include the actual SQLite directory as a separate root.
 
 ### Use a different port or wait longer
 

@@ -62,6 +62,13 @@ func TestSendValidation(t *testing.T) {
 		{"send", "127.0.0.1", "--wait", "-1s"},
 		{"send", "127.0.0.1", "--workers", "-1"},
 		{"send", "127.0.0.1", "--compression", "unsupported"},
+		{"send", "127.0.0.1", "--since", "invalid"},
+		{"send", "127.0.0.1", "--until", "2026-02-30"},
+		{"send", "127.0.0.1", "--since", "2026-10-03", "--until", "2026-10-02"},
+		{"send", "127.0.0.1", "--project-prefix", " "},
+		{"send", "127.0.0.1", "--project-contains", ""},
+		{"send", "127.0.0.1", "--project-prefix", "app", "--extra", "data=/tmp/data"},
+		{"receive", "--project-prefix", "app"},
 		{"receive", "--workers", "257"},
 		{"receive", "--archive-dir", "relative"},
 	} {
@@ -70,5 +77,20 @@ func TestSendValidation(t *testing.T) {
 		if err := app.run(context.Background(), args); err == nil {
 			t.Fatalf("invalid command accepted: %v", args)
 		}
+	}
+}
+
+// TestSendSessionRules exposes repeatable selection flags and keeps the default full migration unchanged.
+func TestSendSessionRules(t *testing.T) {
+	var output bytes.Buffer
+	app := &application{output: &output}
+	values, _, err := app.parseOptions("send", []string{"127.0.0.1", "--since", "2026-10-01", "--until", "2026-10-02",
+		"--project-prefix", "app-", "--project-prefix", "web-", "--project-contains", "api"})
+	if err != nil || values.filter == nil {
+		t.Fatalf("session rules not parsed: %v", err)
+	}
+	values, _, err = app.parseOptions("send", []string{"127.0.0.1"})
+	if err != nil || values.filter != nil {
+		t.Fatalf("default full migration changed: %v", err)
 	}
 }

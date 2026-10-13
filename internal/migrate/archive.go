@@ -49,6 +49,17 @@ func SnapshotContext(ctx context.Context, roots []Root) (*Bundle, error) {
 
 // snapshot overlaps tar construction, parallel compression, disk output, and digest calculation.
 func snapshot(ctx context.Context, roots []Root, workers int, compression string) (*Bundle, error) {
+	return snapshotFiles(ctx, roots, workers, compression, nil)
+}
+
+// snapshotFiles optionally confines archive entries to a previously inspected selection and its ancestors.
+func snapshotFiles(
+	ctx context.Context,
+	roots []Root,
+	workers int,
+	compression string,
+	selected map[string]fs.FileInfo,
+) (*Bundle, error) {
 	if len(roots) == 0 {
 		return nil, errors.New("no source data found")
 	}
@@ -89,9 +100,22 @@ func snapshot(ctx context.Context, roots []Root, workers int, compression string
 			if walkErr != nil {
 				return walkErr
 			}
-			info, err := entry.Info()
+			if selected != nil {
+				if _, included := selected[local]; !included {
+					if entry.IsDir() {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+			}
+			// Match session selection's Lstat snapshots instead of cached Windows enumeration metadata.
+			info, err := os.Lstat(local)
 			if err != nil {
 				return err
+			}
+			if old := selected[local]; old != nil && (!os.SameFile(old, info) || old.Size() != info.Size() ||
+				!old.ModTime().Equal(info.ModTime()) || old.Mode() != info.Mode()) {
+				return fmt.Errorf("source changed after session selection: %s", local)
 			}
 			before[local] = info
 			if info.Mode()&os.ModeSocket != 0 {
@@ -148,6 +172,10 @@ func snapshot(ctx context.Context, roots []Root, workers int, compression string
 			return nil, fmt.Errorf("snapshot %s: %w", root.Name, err)
 		}
 	}
+	if selected != nil && len(before) != len(selected) {
+		_ = writer.Close()
+		return nil, errors.New("selected source entries removed before snapshot")
+	}
 	if err := writer.Close(); err != nil {
 		return nil, err
 	}
@@ -166,7 +194,15 @@ func snapshot(ctx context.Context, roots []Root, workers int, compression string
 			if walkErr != nil {
 				return walkErr
 			}
-			info, err := entry.Info()
+			if selected != nil {
+				if _, included := selected[local]; !included {
+					if entry.IsDir() {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+			}
+			info, err := os.Lstat(local)
 			if err != nil {
 				return err
 			}

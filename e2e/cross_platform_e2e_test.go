@@ -29,7 +29,9 @@ import (
 // writePeerMessage exercises the published protocol independently of the receiver implementation.
 func writePeerMessage(t *testing.T, connection net.Conn, value map[string]any) {
 	t.Helper()
-	value["version"] = 2
+	if _, exists := value["version"]; !exists {
+		value["version"] = 2
+	}
 	data, err := json.Marshal(value)
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +44,7 @@ func writePeerMessage(t *testing.T, connection net.Conn, value map[string]any) {
 }
 
 // readPeerMessage verifies framed readiness and acknowledgement from a real executable.
-func readPeerMessage(t *testing.T, connection net.Conn, expected string) {
+func readPeerMessage(t *testing.T, connection net.Conn, expected string) map[string]any {
 	t.Helper()
 	for {
 		var header [4]byte
@@ -67,7 +69,7 @@ func readPeerMessage(t *testing.T, connection net.Conn, expected string) {
 		if message["kind"] != expected || message["error"] != nil {
 			t.Fatalf("peer phase %s: %s", expected, data)
 		}
-		return
+		return message
 	}
 }
 
