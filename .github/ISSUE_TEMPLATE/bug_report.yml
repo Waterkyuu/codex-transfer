@@ -1,66 +1,89 @@
-name: Bug report / 问题反馈
-description: Report a reproducible transfer or installation problem. / 反馈可复现的传输或安装问题。
+name: Bug report
+description: Report a reproducible transfer or installation problem.
 title: '[Bug]: '
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [installation guide](https://github.com/Waterkyuu/codex-transfer/blob/main/docs/installation.en-US.md) and search existing issues before reporting a bug.
+        Share only sanitized commands and output. Do not attach credentials, session content, or a copy of your Codex data directory.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Installation or upgrade
+        - Connection or pairing
+        - Transfer or extraction
+        - Path adaptation or restored data
+        - Other
+    validations:
+      required: true
   - type: input
     id: version
     attributes:
-      label: Version / 版本
-      description: Paste the output of codex-transfer --version. / 填写版本命令的输出。
-      placeholder: codex-transfer 0.1.0
+      label: Version
+      description: Paste the output of codex-transfer --version from each affected machine. If installation failed, give the version you tried to install.
+      placeholder: codex-transfer 0.1.1
     validations:
       required: true
   - type: input
     id: source
     attributes:
-      label: Source OS and architecture / 发送端系统与架构
-      placeholder: macOS 15, arm64; N/A for installation issues
-    validations:
-      required: true
+      label: Source OS and architecture
+      description: For migration issues, include the sender's OS version and CPU architecture. Leave blank for installation issues.
+      placeholder: macOS 15, arm64
   - type: input
     id: destination
     attributes:
-      label: Destination OS and architecture / 接收端系统与架构
+      label: Affected or destination OS and architecture
+      description: Include the machine where installation failed or the receiving machine for a migration issue.
       placeholder: Windows 11, amd64; Ubuntu 24.04, arm64
     validations:
       required: true
   - type: dropdown
     id: installation
     attributes:
-      label: Installation method / 安装方式
+      label: Installation method
       options:
-        - Release archive / 发布压缩包
-        - Shell or PowerShell installer / 安装脚本
+        - Release archive
+        - Shell installer
+        - PowerShell installer
         - npm
         - Homebrew
         - Scoop
         - go install
-        - Built from source / 源码编译
-        - Other / 其他
+        - Built from source
+        - Other
     validations:
       required: true
   - type: textarea
     id: reproduction
     attributes:
-      label: Steps and commands / 复现步骤与命令
-      description: Include commands from both terminals and the failing stage. / 提供两端命令及失败阶段。
+      label: Steps to reproduce
+      description: Include the exact commands, flags, and failing stage. For migrations, show commands from both terminals. Replace private paths and addresses with consistent placeholders.
+      placeholder: |
+        1. Run ... on the sender.
+        2. Run ... on the receiver.
+        3. Observe ...
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: Expected behavior / 预期行为
+      label: Expected behavior
     validations:
       required: true
   - type: textarea
     id: actual
     attributes:
-      label: Actual behavior / 实际行为
+      label: Actual behavior
+      description: Describe what happened and whether any destination files or backups were created.
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
-      label: Relevant terminal output / 相关终端输出
-      description: Remove credentials and private session content. / 请移除凭据和私人会话内容。
+      label: Relevant terminal output
+      description: Include the error and nearby output from each affected terminal. Remove credentials, pairing codes, and private session content.
       render: text
