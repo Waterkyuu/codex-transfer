@@ -7,20 +7,20 @@ tasks:
   fmt:
     desc: Format Go source
     cmds:
-      - gofmt -w cmd internal e2e
+      - gofmt -w cmd internal e2e .codex/hooks
       - golangci-lint fmt
   lint:
     desc: Check formatting and Go diagnostics
     cmds:
-      - test -z "$(gofmt -l cmd internal e2e)"
-      - go vet ./...
+      - test -z "$(gofmt -l cmd internal e2e .codex/hooks)"
+      - go vet ./... ./.codex/hooks
       - golangci-lint run --timeout=5m
   test:
     desc: Test with race detection
-    cmds: [go test -race ./... -count=1]
+    cmds: [go test -race ./... ./.codex/hooks -count=1]
   test-cover:
     desc: Test with coverage
-    cmds: [go test -race ./... -coverprofile=coverage.out -count=1]
+    cmds: [go test -race ./... ./.codex/hooks -coverprofile=coverage.out -count=1]
   build:
     desc: Build the CLI
     cmds:
@@ -36,3 +36,10 @@ tasks:
     desc: Validate release configuration without publishing
     cmds:
       - goreleaser check
+  hooks:
+    desc: Install local Git hooks
+    preconditions:
+      - sh: command -v "${LEFTHOOK_BIN:-lefthook}"
+        msg: 'Install Lefthook first (for example: brew install lefthook), then run task hooks again.'
+    cmds:
+      - git config --local core.hooksPath .githooks
