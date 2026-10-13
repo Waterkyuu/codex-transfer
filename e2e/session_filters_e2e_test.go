@@ -83,7 +83,7 @@ func TestCLIFilteredSessions(t *testing.T) {
 		}
 	}
 	for range 2 {
-		log := runFilteredTransfer(t, binary, source, destination, "", "")
+		log := runFilteredTransfer(t, binary, source, destination, "", "", "2026-10-01", "2026-10-02")
 		if !strings.Contains(log, "Session merge:") {
 			t.Fatalf("missing merge status: %s", log)
 		}
@@ -214,7 +214,10 @@ func writeFilteredState(t *testing.T, home, id, relative string, receiving bool)
 }
 
 // runFilteredTransfer pairs two isolated binaries and waits for installation acknowledgement.
-func runFilteredTransfer(t *testing.T, binary, source, destination, senderSQLite, receiverSQLite string) string {
+func runFilteredTransfer(
+	t *testing.T,
+	binary, source, destination, senderSQLite, receiverSQLite, since, until string,
+) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -231,8 +234,14 @@ func runFilteredTransfer(t *testing.T, binary, source, destination, senderSQLite
 	receiver.Env = fixtureEnvironment(destination)
 	configureFilteredSQLite(receiver, destination, receiverSQLite)
 	sender := exec.CommandContext(ctx, binary, "send", "127.0.0.1", "--port", port,
-		"--skip-process-check", "--since", "2026-10-01", "--until", "2026-10-02",
+		"--skip-process-check",
 		"--project-prefix", "app-", "--project-contains", "api", "--project-contains", "ui")
+	if since != "" {
+		sender.Args = append(sender.Args, "--since", since)
+	}
+	if until != "" {
+		sender.Args = append(sender.Args, "--until", until)
+	}
 	sender.Env = fixtureEnvironment(source)
 	configureFilteredSQLite(sender, source, senderSQLite)
 	receiverInput, err := receiver.StdinPipe()
@@ -366,7 +375,7 @@ func TestCLIInternalSQLiteHomes(t *testing.T) {
 					}
 				}
 			}
-			runFilteredTransfer(t, binary, source, destination, mode, mode)
+			runFilteredTransfer(t, binary, source, destination, mode, mode, "2026-10-01", "2026-10-02")
 			if _, err := os.Stat(filepath.Join(destination, ".codex", "sessions", "old.jsonl")); !os.IsNotExist(err) {
 				t.Fatalf("stale history transferred: %v", err)
 			}

@@ -33,7 +33,7 @@ codex-transfer send 192.168.1.20 --sqlite-home /home/alice/.codex/sqlite --since
 
 接收端 `sessions/` 和 `archived_sessions/` 内名称不以 `.jsonl` 或 `.jsonl.zst` 结尾的本地符号链接会保留并跳过，包括悬空链接和目录链接，不遍历其目标。rollout 名称的链接、会话目录本身的链接、SQLite 目录及旁路文件的链接，以及传入 rollout 目标的符号链接祖先仍会被拒绝。源端会话筛选和传入会话归档继续拒绝符号链接。
 
-回归测试覆盖两端 CLI、配置优先级、存在干扰数据库的内部 SQLite 目录、不支持的数据库布局和接收端链接保留。测试使用合成数据，不能证明真实 Codex 重启后的发现和恢复行为。迁移后应重启兼容的 Codex 版本并核对导入会话。
+新会话索引同时识别 `user_msg` 和 `user_message` rollout 事件。两种格式均设置用户消息可见性标记，并生成首条消息、标题和预览；后续消息不会覆盖这些初始字段。
 
 ## 默认数据根
 

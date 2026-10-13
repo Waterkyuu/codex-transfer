@@ -52,10 +52,9 @@ targets are never traversed. Rollout-named links, symbolic session tree roots, s
 and sidecars, and symbolic ancestors of incoming rollout destinations remain rejected. Source session
 selection and incoming session archives continue to reject symlinks.
 
-Regression tests cover both CLI endpoints, configuration precedence, internal SQLite directories with
-decoy databases, unsupported database layouts, and retained receiving links. These tests use synthetic
-fixtures and do not establish discovery or resume behavior after a real Codex restart. Restart a compatible
-Codex version after migration and verify the imported conversations.
+New-thread indexing recognizes both `user_msg` and `user_message` rollout events. Both formats set the
+user-message visibility flag and derive the first message, title, and preview; later messages do not
+replace those initial fields.
 
 ## Default data roots
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -216,5 +217,40 @@ func TestSessionIndexRejectsUnknownRequiredColumns(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(destination, "sessions", "new.jsonl")); !os.IsNotExist(err) {
 		t.Fatal("live receiving data changed after index failure")
+	}
+}
+
+// TestSessionIndexUserEventNames keeps imported conversations visible across legacy and current Codex event formats.
+func TestSessionIndexUserEventNames(t *testing.T) {
+	for _, eventType := range []string{"user_msg", "user_message"} {
+		t.Run(eventType, func(t *testing.T) {
+			home := t.TempDir()
+			file := writeSessionFixture(t, home, "sessions/new.jsonl", "new", "2026-10-01T00:00:00Z", "/dev/app")
+			output, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, message := range []string{"First user message", "Later user message"} {
+				if _, err := fmt.Fprintf(
+					output,
+					"{\"type\":\"event_msg\",\"payload\":{\"type\":%q,\"message\":%q}}\n",
+					eventType,
+					message,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := output.Close(); err != nil {
+				t.Fatal(err)
+			}
+			values, err := readSessionIndex(context.Background(), file, file, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if values["has_user_event"] != 1 || values["first_user_message"] != "First user message" ||
+				values["title"] != "First user message" || values["preview"] != "First user message" {
+				t.Fatalf("imported user message not indexed: %v", values)
+			}
+		})
 	}
 }

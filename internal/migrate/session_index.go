@@ -112,7 +112,9 @@ func readSessionIndex(ctx context.Context, file, destination string, archived bo
 			if err := json.Unmarshal(record.Payload, &event); err != nil {
 				return nil, err
 			}
-			if event.Type == "user_msg" && values["has_user_event"] == 0 {
+			// Newer rollouts use user_message; both spellings must set the flag used by native conversation lists.
+			isUserMessage := event.Type == "user_msg" || event.Type == "user_message"
+			if isUserMessage && values["has_user_event"] == 0 {
 				values["has_user_event"], values["first_user_message"] = 1, event.Message
 				title := []rune(strings.TrimSpace(event.Message))
 				if len(title) > 512 {
