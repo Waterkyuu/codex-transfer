@@ -20,6 +20,9 @@ func TestValidateRoots(t *testing.T) {
 func TestDiscoverRoots(t *testing.T) {
 	t.Setenv("CODEX_SQLITE_HOME", "")
 	home := t.TempDir()
+	// Platform discovery must not include a desktop root from the developer's environment.
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	for _, name := range []string{".codex", ".agents"} {
 		if err := os.Mkdir(filepath.Join(home, name), 0700); err != nil {
 			t.Fatal(err)
@@ -37,6 +40,9 @@ func TestDiscoverRoots(t *testing.T) {
 // TestConfiguredPaths resolves custom SQLite state from simple TOML without reading credentials.
 func TestConfiguredPaths(t *testing.T) {
 	home := t.TempDir()
+	// Keep desktop discovery inside this fixture even when the host has Codex installed.
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	if err := os.Mkdir(filepath.Join(home, ".codex"), 0700); err != nil {
 		t.Fatal(err)
 	}
