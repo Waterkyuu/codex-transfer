@@ -77,6 +77,7 @@ func (a *application) migration(ctx context.Context, command string, args []stri
 			Wait:        options.wait,
 			Workers:     options.workers,
 			Compression: options.compression,
+			Filter:      options.filter,
 		}
 		return sender.Send(ctx, address)
 	}
@@ -112,7 +113,7 @@ func (a *application) migration(ctx context.Context, command string, args []stri
 	defer func() { _ = listener.Close() }()
 	_, _ = fmt.Fprintln(
 		a.output,
-		"Destination roots offered by the sender will be replaced; existing data will be backed up.",
+		"Full migrations replace offered roots; filtered sessions are merged. Existing data will be backed up.",
 	)
 	return receiver.Serve(ctx, listener)
 }

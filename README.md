@@ -66,6 +66,7 @@ You can also download a native archive from [Releases](https://github.com/Waterk
 | **Encrypted transfer** | Protect the connection with TLS 1.3 and verify the archive with SHA-256 before installation. |
 | **Backups and recovery** | Keep source data and back up replaced destination roots; roll back ordinary installation failures. |
 | **Custom data locations** | Add external data directories and choose their destinations on the receiving computer. |
+| **Session selection** | Match session creation dates and project-name prefixes or substrings, then merge into existing receiving data. |
 
 ## Quick start
 
@@ -138,6 +139,41 @@ codex-transfer send 192.168.1.20 --workers 0 --compression fast
 `fast` favors throughput; `balanced` and `best` spend more CPU to reduce network bytes. `none` avoids compression overhead for already-compressed files or a very fast local connection. Set `--workers 4` on either terminal to limit parallel processing. Queues are bounded; memory grows with worker count. Progress reports network bytes and speed; the final overall rate also includes preparation and installation. Actual throughput depends on the data, disks, CPU, and network.
 
 ## Choose your connection and data locations
+
+### Transfer matching sessions
+
+Start `codex-transfer receive` on the destination as usual, then select sessions on the source:
+
+```sh
+codex-transfer send 192.168.1.20 --since 2026-10-01 --until 2026-10-13 --project-prefix app-
+codex-transfer send 192.168.1.20 --project-contains api --project-contains backend
+```
+
+Supplying any selection flag enables **session merging**. Both computers need a version that supports it;
+older receivers reject the offer before receiving archive data. Without selection flags, full migration
+continues to replace offered roots and retain backups.
+
+- `--since` and `--until` use inclusive `YYYY-MM-DD` dates in UTC, matched against the creation timestamp
+  in `session_meta`, independently of file modification dates. Either boundary may be omitted.
+- `--project-prefix` and `--project-contains` match the final directory name of the session's initial
+  working directory. Matching is case-sensitive and supports both Unix and Windows path separators.
+- Repeat a project flag to accept any of its values. Different flag categories must all match; for example,
+  a date range plus a prefix plus a substring requires all three conditions.
+
+Only matching active and archived rollouts are sent, including Zstandard rollouts. Source credentials,
+configuration, databases, workspaces, and other roots are excluded; `--extra` cannot be combined with
+session selection. Database-only source metadata, such as custom titles and pinning, is not imported.
+Database-backed paginated histories require full migration and are rejected by session selection.
+Invalid metadata or an empty selection stops the sender before connecting.
+
+Receiving conversations and settings are retained. Duplicate **session IDs** keep the receiving version,
+even if filenames or archived status differ. A path collision between different IDs aborts the merge
+without changing live data. The merge uses private staging and backs up the receiving Codex root and any
+separate SQLite root before installation. Allow disk space for their snapshots, staged copies, and backups.
+For SQLite stores with a completed discovery marker, only that marker is reset so Codex can index imported
+rollouts on its next startup; existing thread rows remain. Restart Codex after completion and allow indexing
+to finish. See the upstream [rollout discovery implementation](https://github.com/openai/codex/blob/main/codex-rs/rollout/src/metadata.rs)
+and [discovery state handling](https://github.com/openai/codex/blob/main/codex-rs/state/src/runtime/backfill.rs).
 
 ### Use a different port or wait longer
 

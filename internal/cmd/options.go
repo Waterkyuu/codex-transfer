@@ -60,12 +60,16 @@ type options struct {
 	importRoot string
 	// pathMappings overrides source project prefixes independently of root installation paths.
 	pathMappings pathFlags
+	// filter selects session merging instead of full-root replacement.
+	filter *migrate.SessionFilter
 }
 
 // parseOptions supports the documented IP-first send syntax and rejects unused arguments.
 func (a *application) parseOptions(command string, args []string) (*options, []string, error) {
 	values := &options{extra: pathFlags{}, mappings: pathFlags{}, pathMappings: pathFlags{}}
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
+	var since, until string
+	prefixes, contains := []string{}, []string{}
 	flags.SetOutput(a.output)
 	flags.StringVar(&values.codexHome, "codex-home", os.Getenv("CODEX_HOME"), "Codex state root (default ~/.codex)")
 	flags.StringVar(&values.sqliteHome, "sqlite-home", "", "Override separately stored SQLite root")
@@ -80,6 +84,12 @@ func (a *application) parseOptions(command string, args []string) (*options, []s
 		flags.IntVar(&values.workers, "workers", 0, "Parallel CPU workers (0: runtime CPU budget, 1-256: explicit)")
 	}
 	if command == "send" {
+		flags.StringVar(&since, "since", "", "Select sessions created on or after YYYY-MM-DD (UTC)")
+		flags.StringVar(&until, "until", "", "Select sessions created on or before YYYY-MM-DD (UTC)")
+		flags.Func("project-prefix", "Select initial project names with this prefix (repeatable, case-sensitive)",
+			func(value string) error { prefixes = append(prefixes, value); return nil })
+		flags.Func("project-contains", "Select initial project names containing this text (repeatable, case-sensitive)",
+			func(value string) error { contains = append(contains, value); return nil })
 		flags.StringVar(
 			&values.compression,
 			"compression",
@@ -114,6 +124,14 @@ func (a *application) parseOptions(command string, args []string) (*options, []s
 	}
 	positional := flags.Args()
 	if command == "send" {
+		filter, err := migrate.NewSessionFilter(since, until, prefixes, contains)
+		if err != nil {
+			return nil, positional, err
+		}
+		values.filter = filter
+		if filter != nil && len(values.extra) > 0 {
+			return nil, positional, errors.New("session filtering cannot be combined with extra data roots")
+		}
 		switch values.compression {
 		case "fast", "balanced", "best", "none":
 		default:
