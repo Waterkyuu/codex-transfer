@@ -83,21 +83,6 @@ func incomingSessions(ctx context.Context, home string) ([]sessionFile, error) {
 	return files, nil
 }
 
-// cloneSessionTarget snapshots local state into private staging so the existing commit rollback still applies.
-func cloneSessionTarget(ctx context.Context, item *installItem) error {
-	if _, err := os.Lstat(item.target); errors.Is(err, os.ErrNotExist) {
-		return os.Mkdir(filepath.Join(item.slot, "data"), 0700)
-	} else if err != nil {
-		return err
-	}
-	bundle, err := SnapshotContext(ctx, []Root{{Name: "data", Path: item.target}})
-	if err != nil {
-		return fmt.Errorf("snapshot receiving root %s: %w", item.name, err)
-	}
-	defer func() { _ = bundle.Close() }()
-	return Extract(contextReader{ctx: ctx, reader: bundle.File}, item.slot, bundle.Size)
-}
-
 // stagedSessionDatabases finds only regular state databases owned by the staged Codex and SQLite roots.
 func stagedSessionDatabases(installation *installation) ([]string, error) {
 	files := []string{}

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +58,15 @@ func TestCLIFilteredSessions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if runtime.GOOS != "windows" {
+		if err := os.WriteFile(
+			filepath.Join(destination, ".codex", "local:note"),
+			[]byte("local note"),
+			0600,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for range 2 {
 		log := runFilteredTransfer(t, binary, source, destination)
 		if !strings.Contains(log, "Session merge:") {
@@ -85,6 +95,12 @@ func TestCLIFilteredSessions(t *testing.T) {
 	data, err = os.ReadFile(filepath.Join(destination, ".codex", "auth.json"))
 	if err != nil || string(data) != destination {
 		t.Fatalf("local credentials overwritten: %s, %v", data, err)
+	}
+	if runtime.GOOS != "windows" {
+		data, err := os.ReadFile(filepath.Join(destination, ".codex", "local:note"))
+		if err != nil || string(data) != "local note" {
+			t.Fatalf("native receiving filename changed: %s, %v", data, err)
+		}
 	}
 	backups, err := filepath.Glob(filepath.Join(destination, ".codex.backup-*"))
 	if err != nil || len(backups) != 2 {
