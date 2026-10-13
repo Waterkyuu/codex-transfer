@@ -1,7 +1,6 @@
 package migrate
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -26,7 +25,13 @@ func sessionEnumText(raw json.RawMessage, fallback string) string {
 
 // readSessionIndex derives only new-thread fields from a rollout; no receiving row is reconstructed from history.
 func readSessionIndex(ctx context.Context, file, destination string, archived bool) (map[string]any, error) {
-	meta, err := readSessionMetadata(ctx, file)
+	reader, closeReader, err := openSessionReader(ctx, file)
+	if err != nil {
+		return nil, err
+	}
+	defer closeReader()
+	scanner := newRolloutScanner(reader)
+	meta, err := readSessionHeader(scanner)
 	if err != nil {
 		return nil, err
 	}
@@ -55,13 +60,6 @@ func readSessionIndex(ctx context.Context, file, destination string, archived bo
 	if archived {
 		values["archived"], values["archived_at"] = 1, info.ModTime().Unix()
 	}
-	reader, closeReader, err := openSessionReader(ctx, file)
-	if err != nil {
-		return nil, err
-	}
-	defer closeReader()
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 64<<10), 16<<20)
 	for scanner.Scan() {
 		var record struct {
 			// Type selects structured context and user events without modifying their stored bytes.
