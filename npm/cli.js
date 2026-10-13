@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const executable = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor',
   process.platform === 'win32' ? 'codex-transfer.exe' : 'codex-transfer');
 if (!fs.existsSync(executable)) {
-  console.error('Binary missing. Run npm rebuild --global @waterkyuu/codex-transfer to complete installation.');
+  console.error('Binary missing. Run npm rebuild --global codex-transfer to complete installation.');
   process.exit(1);
 }
 const child = spawn(executable, process.argv.slice(2), { stdio: 'inherit', windowsHide: false });
