@@ -1,0 +1,27 @@
+name: Feature request / 功能建议
+description: Describe a use case and the behavior you need. / 描述使用场景与期望功能。
+title: '[Feature]: '
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case / 问题与使用场景
+      description: Explain what you are trying to accomplish. / 说明你想完成的任务。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior / 期望行为
+      description: Include example commands when useful. / 必要时提供命令示例。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered / 已考虑的替代方案
+  - type: textarea
+    id: platforms
+    attributes:
+      label: Platforms and context / 平台与补充信息
+      description: Mention operating systems, data size, or network constraints when relevant. / 可注明系统、数据规模或网络限制。
