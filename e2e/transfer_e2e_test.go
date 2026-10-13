@@ -19,14 +19,7 @@ import (
 func TestCLISenderFirstTransfer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	binary := filepath.Join(t.TempDir(), "codex-transfer")
-	if runtime.GOOS == "windows" {
-		binary += ".exe"
-	}
-	build := exec.CommandContext(ctx, "go", "build", "-race", "-o", binary, "../cmd")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build: %s, %v", output, err)
-	}
+	binary := buildCLI(t)
 	source, destination := t.TempDir(), t.TempDir()
 	for _, home := range []string{source, destination} {
 		if err := os.Mkdir(filepath.Join(home, ".codex"), 0700); err != nil {
@@ -126,6 +119,22 @@ func TestCLISenderFirstTransfer(t *testing.T) {
 	}
 }
 
+// buildCLI compiles the real entry point once per test using the current CI toolchain.
+func buildCLI(t *testing.T) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	binary := filepath.Join(t.TempDir(), "codex-transfer")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
+	build := exec.CommandContext(ctx, "go", "build", "-race", "-o", binary, "../cmd")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %s, %v", output, err)
+	}
+	return binary
+}
+
 // fixtureEnvironment isolates all platform data roots so subprocess tests never read real Codex data.
 func fixtureEnvironment(home string) []string {
 	environment := []string{}
@@ -172,7 +181,8 @@ func startCaptured(command *exec.Cmd) (<-chan string, <-chan string, error) {
 		for scanner.Scan() {
 			line := scanner.Text()
 			output.WriteString(line + "\n")
-			if strings.HasPrefix(line, "Pairing code: ") || strings.HasPrefix(line, "Waiting for receiver") {
+			if strings.HasPrefix(line, "Pairing code: ") || strings.HasPrefix(line, "Waiting for receiver") ||
+				strings.HasPrefix(line, "Receiver listening at ") || strings.HasPrefix(line, "Certificate SHA-256: ") {
 				lines <- line
 			}
 		}
