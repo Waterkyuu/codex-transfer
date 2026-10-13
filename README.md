@@ -57,6 +57,8 @@ You can also download a native archive from [Releases](https://github.com/Waterk
 | Feature | What you can do |
 | --- | --- |
 | **Direct IP connection** | Transfer between two computers over IPv4 or IPv6, without setting up SSH or a cloud service. |
+| **Cross-system migration** | Move common Codex state between macOS, Windows, and Linux; translate known config, session, and database paths. |
+| **Parallel processing** | Use multiple CPU workers for compression, decompression, and metadata; choose compression effort to match your network. |
 | **Address discovery** | List local interface addresses and copy a ready-to-use send command. |
 | **Both-terminal approval** | Compare and enter matching pairing codes on both computers before data can be sent. |
 | **Startup checks** | Check that Codex is stopped; the sender waits for the receiving terminal to start. |
@@ -113,9 +115,27 @@ codex-transfer paths --all
 codex-transfer check
 ```
 
-Destination roots are **replaced as a batch, rather than merged**. Existing data is kept in adjacent `.backup-*` files or directories; the source remains intact. Symbolic links are preserved without copying their external targets. Runtime sockets are skipped and reported.
+Destination roots are **replaced as a batch, rather than merged**. Existing data is kept in adjacent `.backup-*` files or directories; the source remains intact. Symbolic links retain their targets; cross-system imports into Windows materialize links whose targets are inside transferred roots. External link targets must be included explicitly. Runtime sockets are skipped and reported.
 
-Raw state transfer requires the **same operating system** on both computers. OS keychain credentials and project repositories outside the selected roots need separate handling. Absolute paths in configuration and session data are preserved, so a different username or directory layout may require path adjustments and signing in again.
+**macOS, Windows, and Linux can transfer to one another.** Common data roots are installed in the destination's local locations. Known paths in configuration, rollout metadata, and Codex SQLite tables are translated; conversation text and credentials are not rewritten. Existing Zstandard rollouts keep their original files and gain adapted plain siblings.
+
+For a different source OS, the complete unchanged snapshot and its manifest are retained under `~/.codex-transfer/imports/<source-os>`. Foreign desktop settings and other roots without an explicit portable destination remain in this archive. Use `--map` when you deliberately want to install a named root elsewhere. OS keychain credentials, OS-specific plugin executables, and repositories outside selected roots require signing in, reinstalling, or copying separately.
+
+## Cross-system paths and transfer speed
+
+The basic `send` and `receive` commands work across supported operating systems. Home and data-root paths are mapped automatically. Map an external project prefix when the destination directory layout differs:
+
+```powershell
+codex-transfer receive --path-map "/Users/alice/dev=D:/dev"
+```
+
+By default, parallel gzip compression uses the runtime's CPU budget. Tune the sender's compression independently of worker count:
+
+```sh
+codex-transfer send 192.168.1.20 --workers 0 --compression fast
+```
+
+`fast` favors throughput; `balanced` and `best` spend more CPU to reduce network bytes. `none` avoids compression overhead for already-compressed files or a very fast local connection. Set `--workers 4` on either terminal to limit parallel processing. Queues are bounded; memory grows with worker count. Progress reports network bytes and speed; the final overall rate also includes preparation and installation. Actual throughput depends on the data, disks, CPU, and network.
 
 ## Choose your connection and data locations
 
