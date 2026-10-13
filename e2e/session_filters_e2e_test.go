@@ -2,6 +2,7 @@ package e2e_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,7 +29,8 @@ func writeFilteredSession(t *testing.T, home, relative, id, timestamp, cwd, text
 	if err != nil {
 		t.Fatal(err)
 	}
-	message, err := json.Marshal(map[string]any{"type": "response_item", "payload": map[string]string{"text": text}})
+	message, err := json.Marshal(map[string]any{"type": "event_msg",
+		"payload": map[string]string{"type": "user_msg", "message": text}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +44,9 @@ func TestCLIFilteredSessions(t *testing.T) {
 	binary := buildCLI(t)
 	source, destination := t.TempDir(), t.TempDir()
 	writeFilteredSession(t, source, "sessions/new.jsonl", "new", "2026-10-01T00:00:00Z",
-		filepath.Join(source, "dev", "app-api"), "selected conversation")
+		filepath.Join(source, "dev", "app-api"), "obsolete conversation")
+	writeFilteredSession(t, source, "sessions/new_current.jsonl", "new", "2026-10-01T00:00:00Z",
+		filepath.Join(source, "dev", "app-api"), "selected current conversation")
 	writeFilteredSession(t, source, "archived_sessions/archive.jsonl", "archive", "2026-10-02T23:59:59Z",
 		filepath.Join(source, "dev", "app-ui"), "selected archived conversation")
 	writeFilteredSession(t, source, "sessions/old.jsonl", "old", "2026-09-30T23:59:59Z",
@@ -53,6 +57,8 @@ func TestCLIFilteredSessions(t *testing.T) {
 		filepath.Join(source, "dev", "app-api"), "source version")
 	writeFilteredSession(t, destination, "archived_sessions/local.jsonl", "duplicate", "2026-09-01T00:00:00Z",
 		filepath.Join(destination, "dev", "app-api"), "destination version")
+	writeFilteredState(t, source, "new", "sessions/new_current.jsonl", false)
+	writeFilteredState(t, destination, "duplicate", "archived_sessions/local.jsonl", true)
 	for _, home := range []string{source, destination} {
 		if err := os.WriteFile(filepath.Join(home, ".codex", "auth.json"), []byte(home), 0600); err != nil {
 			t.Fatal(err)
@@ -73,7 +79,7 @@ func TestCLIFilteredSessions(t *testing.T) {
 			t.Fatalf("missing merge status: %s", log)
 		}
 	}
-	for _, relative := range []string{"sessions/new.jsonl", "archived_sessions/archive.jsonl"} {
+	for _, relative := range []string{"sessions/new_current.jsonl", "archived_sessions/archive.jsonl"} {
 		data, err := os.ReadFile(filepath.Join(destination, ".codex", filepath.FromSlash(relative)))
 		if err != nil || !strings.Contains(string(data), "selected") {
 			t.Fatalf("selected session: %s, %v", data, err)
@@ -83,7 +89,9 @@ func TestCLIFilteredSessions(t *testing.T) {
 			t.Fatalf("project path not translated: %s", data)
 		}
 	}
-	for _, relative := range []string{"sessions/old.jsonl", "sessions/other.jsonl", "sessions/renamed.jsonl"} {
+	for _, relative := range []string{
+		"sessions/new.jsonl", "sessions/old.jsonl", "sessions/other.jsonl", "sessions/renamed.jsonl",
+	} {
 		if _, err := os.Stat(filepath.Join(destination, ".codex", filepath.FromSlash(relative))); !os.IsNotExist(err) {
 			t.Fatalf("excluded or duplicate session imported: %s, %v", relative, err)
 		}
@@ -102,6 +110,30 @@ func TestCLIFilteredSessions(t *testing.T) {
 			t.Fatalf("native receiving filename changed: %s, %v", data, err)
 		}
 	}
+	db, err := sql.Open("sqlite3", filepath.Join(destination, ".codex", "state_5.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var settings string
+	if err := db.QueryRow("SELECT json_array(title, model, approval_mode, archived, tokens_used) FROM threads WHERE id='duplicate'").
+		Scan(&settings); err != nil ||
+		settings != `["Local title","local model","never",1,999]` {
+		t.Fatalf("existing receiving index changed: %s, %v", settings, err)
+	}
+	var marker string
+	if err := db.QueryRow("SELECT status FROM backfill_state WHERE id=1").
+		Scan(&marker); err != nil ||
+		marker != "complete" {
+		t.Fatalf("completed discovery reset: %s, %v", marker, err)
+	}
+	var rollout, title string
+	if err := db.QueryRow("SELECT rollout_path, title FROM threads WHERE id='new'").
+		Scan(&rollout, &title); err != nil ||
+		rollout != filepath.Join(destination, ".codex", "sessions", "new_current.jsonl") ||
+		title != "selected current conversation" {
+		t.Fatalf("current session not indexed: %s, %s, %v", rollout, title, err)
+	}
 	backups, err := filepath.Glob(filepath.Join(destination, ".codex.backup-*"))
 	if err != nil || len(backups) != 2 {
 		t.Fatalf("merge backups: %v, %v", backups, err)
@@ -115,6 +147,54 @@ func TestCLIFilteredSessions(t *testing.T) {
 	empty.Env = fixtureEnvironment(source)
 	if output, err := empty.CombinedOutput(); err == nil || !strings.Contains(string(output), "no sessions match") {
 		t.Fatalf("empty selection: %s, %v", output, err)
+	}
+}
+
+// writeFilteredState supplies a real receiving schema and a source pointer for a reverted rollout.
+func writeFilteredState(t *testing.T, home, id, relative string, receiving bool) {
+	t.Helper()
+	db, err := sql.Open("sqlite3", filepath.Join(home, ".codex", "state_5.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE threads (
+ id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT 0,
+ updated_at INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL DEFAULT 'cli',
+ model_provider TEXT NOT NULL DEFAULT 'openai', cwd TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '',
+ sandbox_policy TEXT NOT NULL DEFAULT 'local sandbox', approval_mode TEXT NOT NULL DEFAULT 'never',
+ tokens_used INTEGER NOT NULL DEFAULT 999, archived INTEGER NOT NULL DEFAULT 1, archived_at INTEGER,
+ model TEXT DEFAULT 'local model');
+ CREATE TABLE backfill_state(id INTEGER PRIMARY KEY, status TEXT, last_watermark TEXT);
+ INSERT INTO backfill_state VALUES(1, 'complete', 'sessions/z.jsonl')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO threads(id, rollout_path, title) VALUES(?, ?, 'Local title')",
+		id, filepath.Join(home, ".codex", filepath.FromSlash(relative))); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !receiving {
+		return
+	}
+	// A stale state version must not suppress the new thread when the active version does not contain it.
+	old, err := sql.Open("sqlite3", filepath.Join(home, ".codex", "state_4.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec("CREATE TABLE threads(id TEXT PRIMARY KEY); INSERT INTO threads VALUES('new')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+	fixture := filepath.Join(home, ".codex", "worktrees", "project", "testdata", "state.sqlite")
+	if err := os.MkdirAll(filepath.Dir(fixture), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fixture, []byte("unrelated project fixture"), 0600); err != nil {
+		t.Fatal(err)
 	}
 }
 

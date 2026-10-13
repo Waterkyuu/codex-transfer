@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// TestSessionMerge retains local state and database rows while requesting discovery of new rollouts.
+// TestSessionMerge retains local state and registers new rollouts without restarting global discovery.
 func TestSessionMerge(t *testing.T) {
 	source, destination, sqlite := t.TempDir(), t.TempDir(), t.TempDir()
 	writeSessionFixture(t, source, "sessions/new.jsonl.zst", "new", "2026-10-01T00:00:00Z", "/dev/app")
@@ -25,9 +25,9 @@ func TestSessionMerge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT); " +
-		"INSERT INTO threads VALUES ('duplicate', 'Local title'); " +
-		"INSERT INTO threads VALUES ('database-only', 'Database title'); " +
+	if _, err := db.Exec("CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, rollout_path TEXT); " +
+		"INSERT INTO threads VALUES ('duplicate', 'Local title', NULL); " +
+		"INSERT INTO threads VALUES ('database-only', 'Database title', NULL); " +
 		"CREATE TABLE backfill_state (id INTEGER PRIMARY KEY, status TEXT, last_watermark TEXT); " +
 		"INSERT INTO backfill_state VALUES (1, 'complete', 'sessions/z.jsonl')"); err != nil {
 		t.Fatal(err)
@@ -70,9 +70,15 @@ func TestSessionMerge(t *testing.T) {
 		title != "Local title" {
 		t.Fatalf("existing database metadata: %q, %v", title, err)
 	}
-	var count int
-	if err := db.QueryRow("SELECT count(*) FROM backfill_state").Scan(&count); err != nil || count != 0 {
-		t.Fatalf("backfill not reset: %d, %v", count, err)
+	var status, watermark string
+	if err := db.QueryRow("SELECT status, last_watermark FROM backfill_state WHERE id = 1").
+		Scan(&status, &watermark); err != nil || status != "complete" || watermark != "sessions/z.jsonl" {
+		t.Fatalf("backfill state changed: %s, %s, %v", status, watermark, err)
+	}
+	var rollout string
+	if err := db.QueryRow("SELECT rollout_path FROM threads WHERE id = 'new'").Scan(&rollout); err != nil ||
+		rollout != filepath.Join(destination, "sessions", "new.jsonl") {
+		t.Fatalf("new session not indexed: %s, %v", rollout, err)
 	}
 }
 

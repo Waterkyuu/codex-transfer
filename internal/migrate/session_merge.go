@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -113,29 +114,6 @@ func sessionDatabaseIDs(ctx context.Context, file string, ids map[string]bool) e
 	return rows.Err()
 }
 
-// requestSessionBackfill clears only the discovery marker so Codex can index newly imported rollouts on startup.
-func requestSessionBackfill(ctx context.Context, file string) error {
-	db, err := sql.Open("sqlite3", databaseURI(file))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = db.Close() }()
-	var exists int
-	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'backfill_state'").
-		Scan(&exists); err != nil {
-		return err
-	}
-	if exists == 0 {
-		return nil
-	}
-	// Codex creates a missing singleton as pending with no watermark, preserving the existing thread rows.
-	if _, err := db.ExecContext(ctx, "DELETE FROM backfill_state WHERE id = 1"); err != nil {
-		return err
-	}
-	_, err = db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
-	return err
-}
-
 // copyMergedSession refuses collisions and symbolic ancestors while copying into receiver-owned staging.
 func copyMergedSession(ctx context.Context, incoming, destination, relative string) error {
 	parent := filepath.Dir(relative)
@@ -220,6 +198,7 @@ func mergeSessionInstallation(ctx context.Context, installation *installation, o
 		}
 	}
 	imported, skipped := map[string]bool{}, map[string]bool{}
+	primary := map[string]sessionFile{}
 	for _, file := range files {
 		if existing[file.id] {
 			skipped[file.id] = true
@@ -229,11 +208,35 @@ func mergeSessionInstallation(ctx context.Context, installation *installation, o
 			return err
 		}
 		imported[file.id] = true
+		previous, exists := primary[file.id]
+		if !exists || strings.HasSuffix(previous.relative, ".zst") {
+			primary[file.id] = file
+		}
 	}
-	if len(imported) > 0 {
+	if len(imported) > 0 && len(databases) > 0 {
+		target := ""
+		for _, item := range installation.items {
+			if item.name == "codex" {
+				target = item.target
+			}
+		}
+		registrations := []sessionFile{}
+		ids := make([]string, 0, len(primary))
+		for id := range primary {
+			ids = append(ids, id)
+		}
+		slices.Sort(ids)
+		for _, id := range ids {
+			registrations = append(registrations, primary[id])
+		}
 		for _, database := range databases {
-			if err := requestSessionBackfill(ctx, database); err != nil {
-				return fmt.Errorf("request receiving session discovery: %w", err)
+			err := registerSessionIndex(ctx, database, registrations, func(file sessionFile) (map[string]any, error) {
+				archived := strings.HasPrefix(filepath.ToSlash(file.relative), "archived_sessions/")
+				return readSessionIndex(ctx, filepath.Join(staged, file.relative),
+					filepath.Join(target, file.relative), archived)
+			})
+			if err != nil {
+				return fmt.Errorf("register receiving sessions: %w", err)
 			}
 		}
 	}
