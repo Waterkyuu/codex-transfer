@@ -282,7 +282,8 @@ func (r *Receiver) receive(ctx context.Context, connection *tls.Conn) error {
 		err = r.Check()
 	}
 	if err == nil {
-		err = ctx.Err()
+		// A whole-root replacement must not discard edits made after a session clone.
+		err = installation.validateSessionTargets(ctx)
 	}
 	if err == nil {
 		err = installation.commit()

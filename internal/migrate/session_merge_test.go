@@ -237,3 +237,89 @@ func TestSessionMergePreservesUnrelatedLinks(t *testing.T) {
 		})
 	}
 }
+
+// TestSessionMergeRejectsPostCloneChanges checks the receiver's final boundary without timing races.
+func TestSessionMergeRejectsPostCloneChanges(t *testing.T) {
+	for _, change := range []string{"config", "rollout", "added", "removed", "sqlite", "canceled"} {
+		t.Run(change, func(t *testing.T) {
+			source, destination, sqlite := t.TempDir(), t.TempDir(), t.TempDir()
+			writeSessionFixture(t, source, "sessions/new.jsonl", "new", "2026-10-01T00:00:00Z", "/project")
+			local := writeSessionFixture(
+				t,
+				destination,
+				"sessions/local.jsonl",
+				"local",
+				"2026-10-01T00:00:00Z",
+				"/local",
+			)
+			config := filepath.Join(destination, "config.toml")
+			if err := os.WriteFile(config, []byte("model = 'old'"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			database := filepath.Join(sqlite, "state_5.sqlite")
+			db, err := sql.Open("sqlite3", database)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(
+				"CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, rollout_path TEXT)",
+			); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			checks := 0
+			receiver := &Receiver{Targets: map[string]string{"codex": destination, "sqlite": sqlite},
+				Output: io.Discard, MaxBytes: 1 << 20}
+			receiver.Check = func() error {
+				checks++
+				if checks != 2 {
+					return nil
+				}
+				switch change {
+				case "config":
+					return os.WriteFile(config, []byte("model = 'edited-after-clone'"), 0600)
+				case "rollout":
+					return os.WriteFile(local, []byte("edited after clone"), 0600)
+				case "added":
+					return os.WriteFile(filepath.Join(destination, "added"), []byte("new"), 0600)
+				case "removed":
+					return os.Remove(config)
+				case "sqlite":
+					db, err := sql.Open("sqlite3", database)
+					if err != nil {
+						return err
+					}
+					defer db.Close()
+					_, err = db.Exec("INSERT INTO threads VALUES ('after-clone', 'keep me', NULL)")
+					return err
+				default:
+					return context.Canceled
+				}
+			}
+			address, ctx, done := startReceiver(t, receiver)
+			filter, _ := NewSessionFilter("2026-10-01", "", nil, nil)
+			sender := &Sender{Roots: []Root{{Name: "codex", Path: source}}, Output: io.Discard,
+				Fingerprint: receiver.Fingerprint(), Filter: filter}
+			if err := sender.Send(ctx, address); err == nil {
+				t.Fatal("sender accepted a changed live root")
+			}
+			if err := <-done; err == nil {
+				t.Fatal("receiver committed a changed live root")
+			}
+			if checks != 2 {
+				t.Fatalf("did not reach final process check: %d", checks)
+			}
+			if _, err := os.Stat(filepath.Join(destination, "sessions", "new.jsonl")); !os.IsNotExist(err) {
+				t.Fatal("incoming rollout installed despite failure")
+			}
+			for _, root := range []string{destination, sqlite} {
+				backups, err := filepath.Glob(root + ".backup-*")
+				if err != nil || len(backups) != 0 {
+					t.Fatalf("live root displaced before validation: %v, %v", backups, err)
+				}
+			}
+		})
+	}
+}
