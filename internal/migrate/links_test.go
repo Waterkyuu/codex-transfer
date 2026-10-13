@@ -1,8 +1,11 @@
 package migrate
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -57,5 +60,97 @@ func TestWindowsArchiveNames(t *testing.T) {
 	}
 	if err := windowsArchiveName("codex/sessions/session-001.jsonl"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestMaterializePendingAncestors resolves directory aliases before copying their descendants in either order.
+func TestMaterializePendingAncestors(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		t.Run(fmt.Sprint(reverse), func(t *testing.T) {
+			target := filepath.Join(t.TempDir(), "codex")
+			installation, err := prepareInstallation([]Root{{Name: "codex", Path: target}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer installation.close()
+			stage, err := installation.resolve("codex")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(stage, "real", "nested"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(
+				filepath.Join(stage, "real", "nested", "file"),
+				[]byte("fixture"),
+				0600,
+			); err != nil {
+				t.Fatal(err)
+			}
+			mapper, err := newPathMapper("linux", map[string]string{"/source": target})
+			if err != nil {
+				t.Fatal(err)
+			}
+			policy := &extractPolicy{
+				mapper:       mapper,
+				installation: installation,
+				sourcePaths:  map[string]string{"codex": "/source"},
+			}
+			links := []pendingLink{
+				{path: filepath.Join(stage, "a"), target: "y/file", root: "codex", relative: "a"},
+				{path: filepath.Join(stage, "y"), target: "z/nested", root: "codex", relative: "y"},
+				{path: filepath.Join(stage, "z"), target: "real", root: "codex", relative: "z"},
+			}
+			if reverse {
+				slices.Reverse(links)
+			}
+			for _, link := range links {
+				if err := policy.materializeLink(link, links, map[string]bool{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			data, err := os.ReadFile(filepath.Join(stage, "a"))
+			if err != nil || string(data) != "fixture" {
+				t.Fatalf("nested alias: %q, %v", data, err)
+			}
+		})
+	}
+}
+
+// TestMaterializeAliasCycle rejects cycles that pass through an unresolved directory ancestor.
+func TestMaterializeAliasCycle(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "codex")
+	installation, err := prepareInstallation([]Root{{Name: "codex", Path: target}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer installation.close()
+	stage, err := installation.resolve("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(stage, 0700); err != nil {
+		t.Fatal(err)
+	}
+	mapper, err := newPathMapper("linux", map[string]string{"/source": target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := &extractPolicy{
+		mapper:       mapper,
+		installation: installation,
+		sourcePaths:  map[string]string{"codex": "/source"},
+	}
+	links := []pendingLink{
+		{path: filepath.Join(stage, "a"), target: "z/file", root: "codex", relative: "a"},
+		{path: filepath.Join(stage, "z"), target: "a", root: "codex", relative: "z"},
+	}
+	if err := policy.materializeLink(
+		links[0],
+		links,
+		map[string]bool{},
+	); err == nil ||
+		!strings.Contains(err.Error(), "cyclic") {
+		t.Fatalf("expected alias cycle rejection: %v", err)
 	}
 }
