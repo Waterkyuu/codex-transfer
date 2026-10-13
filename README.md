@@ -15,7 +15,7 @@ Install codex-transfer on both computers. Native binaries support **macOS, Linux
 ### npm
 
 ```sh
-npm install --global @waterkyuu/codex-transfer
+npm install --global codex-transfer
 ```
 
 Requires Node.js 22 or newer. Downloads the native executable for your platform.

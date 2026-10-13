@@ -2,7 +2,7 @@
 
 ## Availability
 
-The npm package is `@waterkyuu/codex-transfer`; the executable command is `codex-transfer`. Native releases cover macOS, Linux, and Windows on amd64/arm64. Windows archives use ZIP; other platforms use tar.gz.
+The npm package is `codex-transfer`; the executable command is `codex-transfer`. Native releases cover macOS, Linux, and Windows on amd64/arm64. Windows archives use ZIP; other platforms use tar.gz.
 
 Online installation requires an anonymously reachable GitHub Release containing the matching archive and `checksums.txt`. npm also requires a published package of the same version. The initial `0.0.0-development` package is not a released version. Anonymous scripts, default Cask/Scoop downloads, and the public npm wrapper cannot download private release assets. Use an authorized GitHub account to download manually or build from source. Workflows do not change repository visibility and skip public npm publishing for private repositories.
 
@@ -11,13 +11,13 @@ Online installation requires an anonymously reachable GitHub Release containing 
 ### npm
 
 ```sh
-npm install --global @waterkyuu/codex-transfer
+npm install --global codex-transfer
 codex-transfer --version
 ```
 
 Node.js 22+ runs `postinstall`, selects the native archive, checks SHA-256, and installs the executable in the npm package's `vendor` directory. npm creates the command entry point. The wrapper forwards arguments, standard streams, and exit status. Extraction uses `tar` on macOS/Linux and PowerShell on Windows.
 
-Repeat the installation command to upgrade. With `--ignore-scripts`, run `npm rebuild --global @waterkyuu/codex-transfer` to download the binary. Uninstall with `npm uninstall --global @waterkyuu/codex-transfer`.
+Repeat the installation command to upgrade. With `--ignore-scripts`, run `npm rebuild --global codex-transfer` to download the binary. Uninstall with `npm uninstall --global codex-transfer`.
 
 ### Homebrew / macOS
 

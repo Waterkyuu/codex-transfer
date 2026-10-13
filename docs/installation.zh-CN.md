@@ -2,7 +2,7 @@
 
 ## 可用条件
 
-npm 包名是 `@waterkyuu/codex-transfer`，程序命令是 `codex-transfer`。原生二进制覆盖 macOS、Linux、Windows 的 amd64/arm64；Windows 使用 ZIP，其余使用 tar.gz。
+npm 包名是 `codex-transfer`，程序命令是 `codex-transfer`。原生二进制覆盖 macOS、Linux、Windows 的 amd64/arm64；Windows 使用 ZIP，其余使用 tar.gz。
 
 在线安装需要公开可达、含对应归档和 `checksums.txt` 的 GitHub Release。npm 还需要同版本的 npm 包。初始开发版本 `0.0.0-development` 不是已发布版本。仓库私有时，匿名下载脚本、默认 Cask/Scoop 下载和公开 npm 包无法取得二进制；可通过有权限的 GitHub 登录手动下载，或从源码构建。工作流不会将仓库改为公开，也不会为私有仓库发布公开 npm 包。
 
@@ -11,13 +11,13 @@ npm 包名是 `@waterkyuu/codex-transfer`，程序命令是 `codex-transfer`。�
 ### npm
 
 ```sh
-npm install --global @waterkyuu/codex-transfer
+npm install --global codex-transfer
 codex-transfer --version
 ```
 
 Node.js 22 或更新版本执行 `postinstall`：按平台选择归档、验证 SHA-256、安装到 npm 包的 `vendor` 中。npm 提供命令入口；包装器转发参数、标准输入输出和退出码。macOS/Linux 解压需要 `tar`，Windows 需要 PowerShell。
 
-再次运行安装命令即可升级。启用 `--ignore-scripts` 时不会下载二进制，可用 `npm rebuild --global @waterkyuu/codex-transfer` 补齐。卸载：`npm uninstall --global @waterkyuu/codex-transfer`。
+再次运行安装命令即可升级。启用 `--ignore-scripts` 时不会下载二进制，可用 `npm rebuild --global codex-transfer` 补齐。卸载：`npm uninstall --global codex-transfer`。
 
 ### Homebrew / macOS
 

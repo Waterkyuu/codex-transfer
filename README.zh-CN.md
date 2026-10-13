@@ -15,7 +15,7 @@
 ### npm
 
 ```sh
-npm install --global @waterkyuu/codex-transfer
+npm install --global codex-transfer
 ```
 
 需要 Node.js 22 或更新版本，自动下载当前平台的原生程序。

@@ -1,5 +1,5 @@
 {
-  "name": "@waterkyuu/codex-transfer",
+  "name": "codex-transfer",
   "version": "0.1.0",
   "description": "Cross-platform installer for the codex-transfer Go CLI",
   "license": "UNLICENSED",
