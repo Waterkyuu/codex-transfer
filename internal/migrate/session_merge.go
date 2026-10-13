@@ -83,38 +83,6 @@ func incomingSessions(ctx context.Context, home string) ([]sessionFile, error) {
 	return files, nil
 }
 
-// stagedSessionDatabases finds only regular state databases owned by the staged Codex and SQLite roots.
-func stagedSessionDatabases(installation *installation) ([]string, error) {
-	files := []string{}
-	for _, item := range installation.items {
-		if item.name != "codex" && item.name != "sqlite" {
-			continue
-		}
-		err := filepath.WalkDir(
-			filepath.Join(item.slot, "data"),
-			func(file string, entry fs.DirEntry, walkErr error) error {
-				if walkErr != nil {
-					return walkErr
-				}
-				base := entry.Name()
-				state := base == "state.sqlite" ||
-					strings.HasPrefix(base, "state_") && strings.HasSuffix(base, ".sqlite")
-				if state && !entry.IsDir() {
-					if !entry.Type().IsRegular() {
-						return fmt.Errorf("state database is not a regular file: %s", file)
-					}
-					files = append(files, file)
-				}
-				return nil
-			},
-		)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return files, nil
-}
-
 // sessionDatabaseIDs preserves database-only thread identities when checking incoming duplicates.
 func sessionDatabaseIDs(ctx context.Context, file string, ids map[string]bool) error {
 	db, err := sql.Open("sqlite3", databaseURI(file))

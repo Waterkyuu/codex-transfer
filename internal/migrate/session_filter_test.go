@@ -3,6 +3,7 @@ package migrate
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -100,7 +101,7 @@ func TestSelectedSessionSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	selected, count, err := filter.selectFiles(context.Background(), home)
+	selected, count, err := filter.selectFiles(context.Background(), home, "")
 	if err != nil || count != 2 {
 		t.Fatalf("selection = %d, %v", count, err)
 	}
@@ -125,11 +126,11 @@ func TestSelectedSessionSnapshot(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := filter.selectFiles(ctx, home); !errors.Is(err, context.Canceled) {
+	if _, _, err := filter.selectFiles(ctx, home, ""); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation = %v", err)
 	}
 	filter, _ = NewSessionFilter("", "", []string{"missing"}, nil)
-	if _, _, err := filter.selectFiles(context.Background(), home); err == nil {
+	if _, _, err := filter.selectFiles(context.Background(), home, ""); err == nil {
 		t.Fatal("empty selection accepted")
 	}
 }
@@ -139,7 +140,7 @@ func TestSessionSelectionRejectsChangedOrMalformedMetadata(t *testing.T) {
 	home := t.TempDir()
 	file := writeSessionFixture(t, home, "sessions/one.jsonl", "one", "2026-10-01T00:00:00Z", "/dev/app")
 	filter, _ := NewSessionFilter("2026-10-01", "", nil, nil)
-	selected, _, err := filter.selectFiles(context.Background(), home)
+	selected, _, err := filter.selectFiles(context.Background(), home, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +157,7 @@ func TestSessionSelectionRejectsChangedOrMalformedMetadata(t *testing.T) {
 		bundle.Close()
 		t.Fatal("changed selected file accepted")
 	}
-	if _, _, err := filter.selectFiles(context.Background(), home); err == nil {
+	if _, _, err := filter.selectFiles(context.Background(), home, ""); err == nil {
 		t.Fatal("malformed metadata accepted")
 	}
 }
@@ -177,8 +178,66 @@ func TestSessionSelectionRejectsPaginatedHistory(t *testing.T) {
 	if _, _, err := filter.selectFiles(
 		context.Background(),
 		home,
+		"",
 	); err == nil ||
 		!strings.Contains(err.Error(), "paginated") {
 		t.Fatalf("incomplete history accepted: %v", err)
+	}
+}
+
+// TestSessionSelectionUsesCurrentRollout keeps a reverted thread's active file instead of its earlier history.
+func TestSessionSelectionUsesCurrentRollout(t *testing.T) {
+	for _, external := range []bool{false, true} {
+		t.Run(fmt.Sprint(external), func(t *testing.T) {
+			home, sqlite := t.TempDir(), ""
+			if external {
+				sqlite = t.TempDir()
+			}
+			original := writeSessionFixture(
+				t,
+				home,
+				"sessions/original.jsonl",
+				"thread",
+				"2026-10-01T00:00:00Z",
+				"/dev/app",
+			)
+			current := writeSessionFixture(
+				t,
+				home,
+				"sessions/reverted.jsonl",
+				"thread",
+				"2026-10-01T00:00:00Z",
+				"/dev/app",
+			)
+			directory := home
+			if sqlite != "" {
+				directory = sqlite
+			}
+			db, err := sql.Open("sqlite3", filepath.Join(directory, "state_5.sqlite"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec("CREATE TABLE threads(id TEXT, rollout_path TEXT)"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec("INSERT INTO threads VALUES (?, ?)", "thread", current); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			filter, _ := NewSessionFilter("2026-10-01", "", nil, nil)
+			selected, count, err := filter.selectFiles(context.Background(), home, sqlite)
+			if err != nil || count != 1 || selected[current] == nil || selected[original] != nil {
+				t.Fatalf("current rollout selection: %v, %d, %v", selected, count, err)
+			}
+			if err := os.Remove(filepath.Join(directory, "state_5.sqlite")); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := filter.selectFiles(context.Background(), home, sqlite); err == nil ||
+				!strings.Contains(err.Error(), "ambiguous") {
+				t.Fatalf("ambiguous history accepted: %v", err)
+			}
+		})
 	}
 }

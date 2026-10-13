@@ -41,6 +41,43 @@ type sessionMetadata struct {
 	HistoryMode string `json:"history_mode"`
 }
 
+// sessionCandidate retains matching inputs until the current rollout for its stable conversation ID is resolved.
+type sessionCandidate struct {
+	// file is an absolute path beneath the selected source Codex root.
+	file string
+	// info records the file identity and metadata before its session header is read.
+	info fs.FileInfo
+	// meta identifies the conversation and the rules to evaluate after selecting its current file.
+	meta sessionMetadata
+}
+
+// currentSessionCandidate uses the database pointer and rejects multiple unindexed histories instead of guessing.
+func currentSessionCandidate(candidates []sessionCandidate, active string) (sessionCandidate, error) {
+	if active == "" {
+		if len(candidates) != 1 {
+			return sessionCandidate{}, fmt.Errorf(
+				"ambiguous rollouts for session %s; current state database is required",
+				candidates[0].meta.ID,
+			)
+		}
+		return candidates[0], nil
+	}
+	// Reverts retain their thread ID while changing rollout files; lexical order does not identify current history.
+	for _, candidate := range candidates {
+		if candidate.file == active {
+			return candidate, nil
+		}
+	}
+	// Codex may compress the current file without updating its stored plain-path pointer.
+	for _, candidate := range candidates {
+		if strings.TrimSuffix(candidate.file, ".zst") == strings.TrimSuffix(active, ".zst") {
+			return candidate, nil
+		}
+	}
+	return sessionCandidate{}, fmt.Errorf("current rollout for session %s is missing from source trees",
+		candidates[0].meta.ID)
+}
+
 // NewSessionFilter validates inclusive UTC calendar dates and returns nil when no rules were supplied.
 func NewSessionFilter(since, until string, prefixes, contains []string) (*SessionFilter, error) {
 	if since == "" && until == "" && len(prefixes) == 0 && len(contains) == 0 {
@@ -173,47 +210,78 @@ func walkSessionFiles(ctx context.Context, home string, visit func(string, fs.Fi
 }
 
 // selectFiles records matching rollouts and their ancestors for a consistent sparse archive.
-func (f *SessionFilter) selectFiles(ctx context.Context, home string) (map[string]fs.FileInfo, int, error) {
-	home = filepath.Clean(home)
+func (f *SessionFilter) selectFiles(
+	ctx context.Context,
+	home, sqliteOverride string,
+) (map[string]fs.FileInfo, int, error) {
+	home, err := filepath.Abs(home)
+	if err != nil {
+		return nil, 0, err
+	}
+	directory, err := sessionSQLiteHome(home, sqliteOverride)
+	if err != nil {
+		return nil, 0, err
+	}
+	database, err := sessionStateDatabase(directory)
+	if err != nil {
+		return nil, 0, err
+	}
+	active, err := sessionRolloutPaths(ctx, database)
+	if err != nil {
+		return nil, 0, err
+	}
 	selected := map[string]fs.FileInfo{}
-	ids := map[string]bool{}
-	err := walkSessionFiles(ctx, home, func(file string, info fs.FileInfo) error {
+	groups := map[string][]sessionCandidate{}
+	ids := []string{}
+	err = walkSessionFiles(ctx, home, func(file string, info fs.FileInfo) error {
 		meta, err := readSessionMetadata(ctx, file)
 		if err != nil {
 			return fmt.Errorf("read session %s: %w", file, err)
 		}
-		match, err := f.matches(meta)
+		if _, exists := groups[meta.ID]; !exists {
+			ids = append(ids, meta.ID)
+			groups[meta.ID] = []sessionCandidate{}
+		}
+		groups[meta.ID] = append(groups[meta.ID], sessionCandidate{file: file, info: info, meta: meta})
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	count := 0
+	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, err
+		}
+		candidate, err := currentSessionCandidate(groups[id], active[id])
 		if err != nil {
-			return fmt.Errorf("match session %s: %w", file, err)
+			return nil, 0, err
+		}
+		match, err := f.matches(candidate.meta)
+		if err != nil {
+			return nil, 0, fmt.Errorf("match session %s: %w", candidate.file, err)
 		}
 		if !match {
-			return nil
+			continue
 		}
-		if ids[meta.ID] {
-			return nil
+		if candidate.meta.HistoryMode == "paginated" {
+			return nil, 0, fmt.Errorf("session %s uses database-backed paginated history; use full migration", id)
 		}
-		if meta.HistoryMode == "paginated" {
-			return fmt.Errorf("session %s uses database-backed paginated history; use full migration", meta.ID)
-		}
-		ids[meta.ID] = true
-		selected[file] = info
-		for directory := filepath.Dir(file); ; directory = filepath.Dir(directory) {
+		count++
+		selected[candidate.file] = candidate.info
+		for directory := filepath.Dir(candidate.file); ; directory = filepath.Dir(directory) {
 			info, err := os.Lstat(directory)
 			if err != nil {
-				return err
+				return nil, 0, err
 			}
 			selected[directory] = info
 			if directory == home {
 				break
 			}
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, 0, err
 	}
-	if len(ids) == 0 {
+	if count == 0 {
 		return nil, 0, errors.New("no sessions match the transfer rules")
 	}
-	return selected, len(ids), nil
+	return selected, count, nil
 }

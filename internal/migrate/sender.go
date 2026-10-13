@@ -63,7 +63,11 @@ func (s *Sender) Send(ctx context.Context, address string) error {
 	var err error
 	if s.Filter != nil {
 		roots = []Root{}
+		sqliteHome := ""
 		for _, root := range s.Roots {
+			if root.Name == "sqlite" {
+				sqliteHome = root.Path
+			}
 			if root.Name == "codex" {
 				absolute, err := filepath.Abs(root.Path)
 				if err != nil {
@@ -79,7 +83,7 @@ func (s *Sender) Send(ctx context.Context, address string) error {
 		if err := ValidateRoots(roots); err != nil {
 			return err
 		}
-		selected, count, selectionErr := s.Filter.selectFiles(ctx, roots[0].Path)
+		selected, count, selectionErr := s.Filter.selectFiles(ctx, roots[0].Path, sqliteHome)
 		if selectionErr != nil {
 			return selectionErr
 		}
