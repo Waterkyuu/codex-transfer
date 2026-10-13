@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -268,5 +270,67 @@ func TestListSessionsUsesIndexedWorkspace(t *testing.T) {
 		if session.ID == "one" && session.Workspace != "/dev/app" {
 			t.Fatalf("indexed workspace ignored: %+v", session)
 		}
+	}
+}
+
+// TestClearSessionsProtectsForkReferences rejects references from retained rollouts while allowing internal ones.
+func TestClearSessionsProtectsForkReferences(t *testing.T) {
+	for _, scenario := range []string{"retained-child", "archived-child", "reverted-rollout", "internal-reference", "delete-child"} {
+		t.Run(scenario, func(t *testing.T) {
+			home := t.TempDir()
+			parentID := "00000000-0000-0000-0000-000000000303"
+			rolloutID := parentID
+			if scenario == "reverted-rollout" {
+				rolloutID = "00000000-0000-0000-0000-000000000305"
+			}
+			parent := writeSessionFixture(t, home, "sessions/rollout-2026-10-01T00-00-00-"+rolloutID+".jsonl.zst",
+				parentID, "2026-10-01T00:00:00Z", "/dev/parent")
+			childDirectory := "sessions"
+			if scenario == "archived-child" {
+				childDirectory = "archived_sessions"
+			}
+			child := writeSessionFixture(
+				t,
+				home,
+				childDirectory+"/child.jsonl",
+				"child",
+				"2026-10-01T00:00:01Z",
+				"/dev/child",
+			)
+			data := fmt.Sprintf(
+				`{"type":"session_meta","payload":{"id":"child","cwd":"/dev/child","timestamp":"2026-10-01T00:00:01Z","history_mode":"paginated","history_base":{"thread_id":%q,"end_ordinal_exclusive":1,"end_byte_offset":100}}}`+"\n",
+				rolloutID,
+			)
+			if err := os.WriteFile(child, []byte(data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			usage, err := ListSessions(context.Background(), home, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			selected := []SessionUsage{}
+			for _, session := range usage {
+				if scenario == "internal-reference" || scenario == "delete-child" && session.ID == "child" ||
+					scenario != "delete-child" && session.ID == parentID {
+					selected = append(selected, session)
+				}
+			}
+			err = ClearSessions(context.Background(), home, "", selected)
+			refused := scenario != "internal-reference" && scenario != "delete-child"
+			if refused {
+				if err == nil || !strings.Contains(err.Error(), "forked history") {
+					t.Fatalf("referenced parent deletion = %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			for _, file := range []string{parent, child} {
+				_, statErr := os.Stat(file)
+				deleted := !refused && (scenario == "internal-reference" || file == child)
+				if deleted != errors.Is(statErr, os.ErrNotExist) {
+					t.Fatalf("unexpected rollout state for %s: %v", file, statErr)
+				}
+			}
+		})
 	}
 }

@@ -135,3 +135,55 @@ INSERT INTO threads VALUES ('one', '/dev/app'), ('two', '/other/app');`)
 		})
 	}
 }
+
+// TestCLIClearSessionsForkReferences preserves retained forks and permits deleting the entire reference set.
+func TestCLIClearSessionsForkReferences(t *testing.T) {
+	binary := buildCLI(t)
+	for _, all := range []bool{false, true} {
+		t.Run(fmt.Sprintf("all=%t", all), func(t *testing.T) {
+			home := t.TempDir()
+			parentID := "00000000-0000-0000-0000-000000000303"
+			rolloutID := "00000000-0000-0000-0000-000000000305"
+			parentName := "sessions/rollout-2026-10-01T00-00-00-" + rolloutID + ".jsonl"
+			writeFilteredSession(t, home, parentName, parentID, "2026-10-01T00:00:00Z", "/dev/parent", "shared history")
+			writeFilteredSession(
+				t,
+				home,
+				"archived_sessions/child.jsonl",
+				"child",
+				"2026-10-01T00:00:01Z",
+				"/dev/child",
+				"fork",
+			)
+			child := filepath.Join(home, ".codex", "archived_sessions", "child.jsonl")
+			data := fmt.Sprintf(
+				`{"type":"session_meta","payload":{"id":"child","cwd":"/dev/child","timestamp":"2026-10-01T00:00:01Z","history_mode":"paginated","history_base":{"thread_id":%q,"end_ordinal_exclusive":1,"end_byte_offset":100}}}`+"\n",
+				rolloutID,
+			)
+			if err := os.WriteFile(child, []byte(data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"clear-sessions", "--skip-process-check"}
+			if all {
+				args = append(args, "--all")
+			} else {
+				args = append(args, "--session", parentID)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, binary, args...)
+			command.Env = fixtureEnvironment(home)
+			command.Stdin = strings.NewReader("yes\nDELETE\n")
+			output, err := command.CombinedOutput()
+			if all && err != nil || !all && (err == nil || !strings.Contains(string(output), "forked history")) {
+				t.Fatalf("fork deletion: %s, %v", output, err)
+			}
+			for _, file := range []string{filepath.Join(home, ".codex", filepath.FromSlash(parentName)), child} {
+				_, err := os.Stat(file)
+				if all != os.IsNotExist(err) {
+					t.Fatalf("rollout state for %s: %v", file, err)
+				}
+			}
+		})
+	}
+}

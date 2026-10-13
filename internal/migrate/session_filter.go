@@ -39,12 +39,20 @@ type sessionMetadata struct {
 	CWD string `json:"cwd"`
 	// HistoryMode detects rollouts whose conversation content depends on an external database.
 	HistoryMode string `json:"history_mode"`
+	// HistoryBase references an inherited rollout range that must survive while this file is retained.
+	HistoryBase *sessionHistoryReference `json:"history_base"`
 	// Source preserves the originating CLI, IDE, or subagent classification for the receiving index.
 	Source json.RawMessage `json:"source"`
 	// ModelProvider identifies the provider required to resume the conversation.
 	ModelProvider string `json:"model_provider"`
 	// CLIVersion records which Codex version originally created the rollout.
 	CLIVersion string `json:"cli_version"`
+}
+
+// sessionHistoryReference identifies the source rollout of an inherited conversation prefix.
+type sessionHistoryReference struct {
+	// ThreadID is the source rollout identity, which can differ from its conversation ID after a revert.
+	ThreadID string `json:"thread_id"`
 }
 
 // sessionCandidate retains matching inputs until the current rollout for its stable conversation ID is resolved.

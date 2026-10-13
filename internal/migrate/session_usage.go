@@ -137,6 +137,9 @@ func ClearSessions(ctx context.Context, home, sqliteHome string, selected []Sess
 	if err := validateSessionDeletion(selected, current); err != nil {
 		return err
 	}
+	if err := validateSessionReferences(selected, current); err != nil {
+		return err
+	}
 	roots := []Root{{Name: "codex", Path: home}}
 	if !within(home, directory) {
 		if _, err := os.Lstat(directory); err == nil {
@@ -196,6 +199,9 @@ func ClearSessions(ctx context.Context, home, sqliteHome string, selected []Sess
 		return err
 	}
 	if err := validateSessionDeletion(selected, current); err != nil {
+		return err
+	}
+	if err := validateSessionReferences(selected, current); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
