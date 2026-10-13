@@ -110,20 +110,15 @@ func sessionStateDatabase(directory string) (string, error) {
 
 // sessionSQLiteHome resolves explicit overrides, configuration, environment, then the Codex root.
 func sessionSQLiteHome(codexHome, override string) (string, error) {
-	if override != "" {
-		return filepath.Abs(override)
+	configured := map[string]string{}
+	if override == "" {
+		var err error
+		configured, err = configuredPaths(filepath.Join(codexHome, "config.toml"))
+		if err != nil {
+			return "", err
+		}
 	}
-	configured, err := configuredPaths(filepath.Join(codexHome, "config.toml"))
-	if err != nil {
-		return "", err
-	}
-	if directory := configured["sqlite_home"]; directory != "" {
-		return filepath.Abs(directory)
-	}
-	if directory := os.Getenv("CODEX_SQLITE_HOME"); directory != "" {
-		return filepath.Abs(directory)
-	}
-	return filepath.Abs(codexHome)
+	return effectiveSQLiteHome(codexHome, override, configured)
 }
 
 // stagedSessionStateDatabase rejects cloned aliases before resolving a writable private state database.

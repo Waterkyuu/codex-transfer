@@ -134,3 +134,79 @@ func TestUnsupportedConfiguredPath(t *testing.T) {
 		t.Fatal("unsupported syntax accepted")
 	}
 }
+
+// TestEffectiveSQLiteHome keeps discovery and session operations aligned for every selector source.
+func TestEffectiveSQLiteHome(t *testing.T) {
+	for _, selector := range []string{"default", "internal CLI", "external CLI", "relative CLI", "config", "environment"} {
+		t.Run(selector, func(t *testing.T) {
+			home := t.TempDir()
+			codex := filepath.Join(home, "codex")
+			if err := os.Mkdir(codex, 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("CODEX_SQLITE_HOME", "")
+			want, override, configured := codex, "", map[string]string{}
+			switch selector {
+			case "internal CLI":
+				want = filepath.Join(codex, "sqlite")
+				override = want
+			case "external CLI":
+				want = filepath.Join(home, "sqlite")
+				override = want
+			case "relative CLI":
+				override = "relative-state"
+				var err error
+				want, err = filepath.Abs(override)
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "config":
+				want = filepath.Join(codex, "sqlite")
+				configured["sqlite_home"] = want
+			case "environment":
+				want = filepath.Join(codex, "sqlite")
+				t.Setenv("CODEX_SQLITE_HOME", want)
+			}
+			if override != "" || selector == "config" {
+				t.Setenv("CODEX_SQLITE_HOME", filepath.Join(home, "ignored-env"))
+			}
+			if override != "" {
+				configured["sqlite_home"] = filepath.Join(home, "ignored-config")
+			}
+			if path := configured["sqlite_home"]; path != "" {
+				if err := os.WriteFile(
+					filepath.Join(codex, "config.toml"),
+					[]byte("sqlite_home = "+tomlPath(path)),
+					0600,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := effectiveSQLiteHome(codex, override, configured)
+			if err != nil || got != want {
+				t.Fatalf("effective path: %q, %v", got, err)
+			}
+			got, err = sessionSQLiteHome(codex, override)
+			if err != nil || got != want {
+				t.Fatalf("session path: %q, %v", got, err)
+			}
+			roots, err := Discover(home, codex, override, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var external string
+			for _, root := range roots {
+				if root.Name == "sqlite" {
+					external = root.Path
+				}
+			}
+			if within(codex, want) {
+				if external != "" {
+					t.Fatalf("internal state became separate root: %q", external)
+				}
+			} else if external != want {
+				t.Fatalf("external root: %q, want %q", external, want)
+			}
+		})
+	}
+}

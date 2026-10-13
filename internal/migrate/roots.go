@@ -63,14 +63,11 @@ func Discover(home, codexHome, sqliteHome string, source bool) ([]Root, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Explicit CLI values take precedence; relative Codex state paths use the working directory.
-	if sqliteHome == "" {
-		sqliteHome = paths["sqlite_home"]
+	sqliteHome, err = effectiveSQLiteHome(codexHome, sqliteHome, paths)
+	if err != nil {
+		return nil, err
 	}
-	if sqliteHome == "" {
-		sqliteHome = os.Getenv("CODEX_SQLITE_HOME")
-	}
-	if sqliteHome != "" && !within(codexHome, sqliteHome) {
+	if !within(codexHome, sqliteHome) {
 		roots = append(roots, Root{Name: "sqlite", Path: sqliteHome})
 	}
 	if logDir := paths["log_dir"]; logDir != "" && !within(codexHome, logDir) {
@@ -219,4 +216,19 @@ func validName(name string) bool {
 		}
 	}
 	return true
+}
+
+// effectiveSQLiteHome applies CLI, configuration, environment, then default precedence relative to the local working directory.
+func effectiveSQLiteHome(codexHome, override string, configured map[string]string) (string, error) {
+	directory := override
+	if directory == "" {
+		directory = configured["sqlite_home"]
+	}
+	if directory == "" {
+		directory = os.Getenv("CODEX_SQLITE_HOME")
+	}
+	if directory == "" {
+		directory = codexHome
+	}
+	return filepath.Abs(directory)
 }
