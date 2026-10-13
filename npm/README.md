@@ -1,9 +1,9 @@
-# @waterkyuu/codex-transfer
+# codex-transfer
 
 Install the native Go CLI for macOS, Linux, or Windows on amd64/arm64:
 
 ```sh
-npm install --global @waterkyuu/codex-transfer
+npm install --global codex-transfer
 codex-transfer --version
 ```
 
@@ -14,11 +14,11 @@ SHA-256 checksum during `postinstall`; no local Go compiler is needed.
 If lifecycle scripts were disabled, run:
 
 ```sh
-npm rebuild --global @waterkyuu/codex-transfer
+npm rebuild --global codex-transfer
 ```
 
 Repeat the global install command to upgrade. Remove with
-`npm uninstall --global @waterkyuu/codex-transfer`; Codex data is not removed.
+`npm uninstall --global codex-transfer`; Codex data is not removed.
 
 For a release mirror, set `CODEX_TRANSFER_RELEASE_BASE_URL` to a base directory
 containing `vVERSION/checksums.txt` and the matching release archive.
