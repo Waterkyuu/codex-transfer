@@ -60,7 +60,7 @@ func isolatedCodexEnvironment(t *testing.T, home string) []string {
 			t.Fatal(err)
 		}
 	}
-	return []string{
+	environment := []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + home,
 		"USERPROFILE=" + home,
@@ -71,7 +71,18 @@ func isolatedCodexEnvironment(t *testing.T, home string) []string {
 		"XDG_CACHE_HOME=" + filepath.Join(home, ".cache"),
 		"XDG_DATA_HOME=" + filepath.Join(home, ".local", "share"),
 		"LANG=en_US.UTF-8",
+		"APPDATA=" + filepath.Join(home, "AppData", "Roaming"),
+		"LOCALAPPDATA=" + filepath.Join(home, "AppData", "Local"),
+		"TEMP=" + filepath.Join(home, "tmp"),
+		"TMP=" + filepath.Join(home, "tmp"),
 	}
+	// Windows needs these system runtime paths, not the runner's user configuration or credentials.
+	for _, key := range []string{"SystemRoot", "WINDIR", "ComSpec", "PATHEXT"} {
+		if value := os.Getenv(key); value != "" {
+			environment = append(environment, key+"="+value)
+		}
+	}
+	return environment
 }
 
 // prepareRealCodexHome creates test-owned paths and a local-only provider without copying any user files.
@@ -171,11 +182,15 @@ func startRealCodex(t *testing.T, binary, home string) *codexTestProcess {
 		// CodexHome confirms the server did not select the developer's persistent state.
 		CodexHome string `json:"codexHome"`
 	}
-	if err := json.Unmarshal(
-		initialized,
-		&resolved,
-	); err != nil ||
-		resolved.CodexHome != filepath.Join(home, ".codex") {
+	if err := json.Unmarshal(initialized, &resolved); err != nil {
+		t.Fatal(err)
+	}
+	wanted, err := os.Stat(filepath.Join(home, ".codex"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, err := os.Stat(resolved.CodexHome)
+	if err != nil || !os.SameFile(wanted, actual) {
 		t.Fatalf("unexpected real Codex home: %s, %v", resolved.CodexHome, err)
 	}
 	if err := process.input.Encode(map[string]any{"method": "initialized", "params": map[string]any{}}); err != nil {
@@ -382,22 +397,7 @@ func TestRealCodexSessionRestart(t *testing.T) {
 			process.stop(t)
 			local := ""
 			if initialized {
-				process = startRealCodex(t, codexBinary, destination)
-				local = createRealCodexThread(t, process, destination, "RECEIVER_LOCAL_CANARY")
-				process.call(t, "thread/name/set", map[string]any{"threadId": local, "name": "Retained local name"})
-				process.stop(t)
-				// Pinning is deliberately SQLite-only so replaying rollout metadata cannot satisfy preservation.
-				db, err := sql.Open("sqlite3", filepath.Join(destination, ".codex", "sqlite", "state_5.sqlite"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if _, err := db.Exec("UPDATE threads SET is_pinned=1 WHERE id=?", local); err != nil {
-					_ = db.Close()
-					t.Fatal(err)
-				}
-				if err := db.Close(); err != nil {
-					t.Fatal(err)
-				}
+				local = prepareRealCodexReceiver(t, codexBinary, destination)
 			}
 			// Both native processes have exited before the migration CLI uses its synthetic-data process-check bypass.
 			receiverMode := "environment"
@@ -405,79 +405,107 @@ func TestRealCodexSessionRestart(t *testing.T) {
 				receiverMode = "cli"
 			}
 			runFilteredTransfer(t, binary, source, destination, "environment", receiverMode, "", "")
-			process = startRealCodex(t, codexBinary, destination)
-			for _, selection := range []struct {
-				// id is the native identity that must be discoverable after importing its rollout.
-				id string
-				// archived selects the corresponding native conversation history list.
-				archived bool
-			}{
-				{id: active}, {id: archived, archived: true},
-			} {
-				listed := process.call(t, "thread/list", map[string]any{
-					"limit": 100, "modelProviders": []string{}, "archived": selection.archived,
-					"useStateDbOnly": true,
-				})
-				if !strings.Contains(string(listed), selection.id) {
-					t.Fatalf(
-						"real Codex did not list imported thread %s (archived=%t): %s",
-						selection.id,
-						selection.archived,
-						listed,
-					)
-				}
-			}
-			if local != "" {
-				assertRealCodexHistory(t, process, local, "RECEIVER_LOCAL_CANARY", "Retained local name")
-			}
-			for _, thread := range []struct {
-				// id selects an imported thread for real resumption.
-				id string
-				// marker proves its earlier conversation reaches the resumed model request.
-				marker string
-			}{
-				{id: active, marker: "SOURCE_ACTIVE_CANARY"},
-				{id: archived, marker: "SOURCE_ARCHIVED_CANARY"},
-			} {
-				assertRealCodexHistory(t, process, thread.id, thread.marker, "ISOLATED_MODEL_REPLY")
-				if thread.id == archived {
-					process.call(t, "thread/unarchive", map[string]any{"threadId": thread.id})
-				}
-				process.call(t, "thread/resume", map[string]any{"threadId": thread.id})
-				process.turn(t, thread.id, "CONTINUED_AFTER_IMPORT")
-				found := false
-				for len(requests) > 0 {
-					request := <-requests
-					found = found ||
-						strings.Contains(request, thread.marker) && strings.Contains(request, "CONTINUED_AFTER_IMPORT") &&
-							strings.Contains(request, "ISOLATED_MODEL_REPLY")
-				}
-				if !found {
-					t.Fatal("resumed model request omitted the imported conversation")
-				}
-			}
-			process.stop(t)
-			process = startRealCodex(t, codexBinary, destination)
-			assertRealCodexHistory(t, process, active, "SOURCE_ACTIVE_CANARY", "CONTINUED_AFTER_IMPORT")
-			assertRealCodexHistory(t, process, archived, "SOURCE_ARCHIVED_CANARY", "CONTINUED_AFTER_IMPORT")
-			if local != "" {
-				assertRealCodexHistory(t, process, local, "RECEIVER_LOCAL_CANARY", "Retained local name")
-			}
-			process.stop(t)
-			if local != "" {
-				db, err := sql.Open("sqlite3", filepath.Join(destination, ".codex", "sqlite", "state_5.sqlite"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer db.Close()
-				var pinned int
-				if err := db.QueryRow("SELECT is_pinned FROM threads WHERE id=?", local).
-					Scan(&pinned); err != nil ||
-					pinned != 1 {
-					t.Fatalf("SQLite-only receiving pin changed: %d, %v", pinned, err)
-				}
-			}
+			verifyRealCodexImports(t, codexBinary, destination, active, archived, local, requests)
 			t.Log("native lists, imported histories, completed resumed turns, and second-restart persistence verified")
 		})
 	}
+}
+
+// verifyRealCodexImports checks list visibility, model-visible history, and persistence across two native restarts.
+func verifyRealCodexImports(t *testing.T, codexBinary, home, active, archived, local string, requests <-chan string) {
+	t.Helper()
+	process := startRealCodex(t, codexBinary, home)
+	for _, selection := range []struct {
+		// id is the native identity that must be discoverable after importing its rollout.
+		id string
+		// archived selects the corresponding native conversation history list.
+		archived bool
+	}{
+		{id: active}, {id: archived, archived: true},
+	} {
+		listed := process.call(t, "thread/list", map[string]any{
+			"limit": 100, "modelProviders": []string{}, "archived": selection.archived,
+			"useStateDbOnly": true,
+		})
+		if !strings.Contains(string(listed), selection.id) {
+			t.Fatalf(
+				"real Codex did not list imported thread %s (archived=%t): %s",
+				selection.id,
+				selection.archived,
+				listed,
+			)
+		}
+	}
+	if local != "" {
+		assertRealCodexHistory(t, process, local, "RECEIVER_LOCAL_CANARY", "Retained local name")
+	}
+	for _, thread := range []struct {
+		// id selects an imported thread for real resumption.
+		id string
+		// marker proves its earlier conversation reaches the resumed model request.
+		marker string
+	}{
+		{id: active, marker: "SOURCE_ACTIVE_CANARY"},
+		{id: archived, marker: "SOURCE_ARCHIVED_CANARY"},
+	} {
+		assertRealCodexHistory(t, process, thread.id, thread.marker, "ISOLATED_MODEL_REPLY")
+		if thread.id == archived {
+			process.call(t, "thread/unarchive", map[string]any{"threadId": thread.id})
+		}
+		process.call(t, "thread/resume", map[string]any{"threadId": thread.id})
+		process.turn(t, thread.id, "CONTINUED_AFTER_IMPORT")
+		found := false
+		for len(requests) > 0 {
+			request := <-requests
+			found = found ||
+				strings.Contains(request, thread.marker) && strings.Contains(request, "CONTINUED_AFTER_IMPORT") &&
+					strings.Contains(request, "ISOLATED_MODEL_REPLY")
+		}
+		if !found {
+			t.Fatal("resumed model request omitted the imported conversation")
+		}
+	}
+	process.stop(t)
+	process = startRealCodex(t, codexBinary, home)
+	assertRealCodexHistory(t, process, active, "SOURCE_ACTIVE_CANARY", "CONTINUED_AFTER_IMPORT")
+	assertRealCodexHistory(t, process, archived, "SOURCE_ARCHIVED_CANARY", "CONTINUED_AFTER_IMPORT")
+	if local != "" {
+		assertRealCodexHistory(t, process, local, "RECEIVER_LOCAL_CANARY", "Retained local name")
+	}
+	process.stop(t)
+	if local != "" {
+		db, err := sql.Open("sqlite3", filepath.Join(home, ".codex", "sqlite", "state_5.sqlite"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		var pinned int
+		if err := db.QueryRow("SELECT is_pinned FROM threads WHERE id=?", local).
+			Scan(&pinned); err != nil ||
+			pinned != 1 {
+			t.Fatalf("SQLite-only receiving pin changed: %d, %v", pinned, err)
+		}
+	}
+}
+
+// prepareRealCodexReceiver seeds a native receiving conversation and SQLite-only metadata before migration.
+func prepareRealCodexReceiver(t *testing.T, codexBinary, home string) string {
+	t.Helper()
+	process := startRealCodex(t, codexBinary, home)
+	local := createRealCodexThread(t, process, home, "RECEIVER_LOCAL_CANARY")
+	process.call(t, "thread/name/set", map[string]any{"threadId": local, "name": "Retained local name"})
+	process.stop(t)
+	// Pinning is deliberately SQLite-only so replaying rollout metadata cannot satisfy preservation.
+	db, err := sql.Open("sqlite3", filepath.Join(home, ".codex", "sqlite", "state_5.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("UPDATE threads SET is_pinned=1 WHERE id=?", local); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return local
 }
