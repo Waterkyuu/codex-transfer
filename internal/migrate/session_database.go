@@ -11,6 +11,13 @@ import (
 	"strings"
 )
 
+const (
+	// supportedSessionStateVersion identifies the Codex state filename contract supported by selective imports.
+	supportedSessionStateVersion = 5
+	// supportedSessionStateFilename is the database opened by Codex releases within the supported contract.
+	supportedSessionStateFilename = "state_5.sqlite"
+)
+
 // sessionRolloutPaths reads authoritative thread pointers without allowing writes to the offline source database.
 func sessionRolloutPaths(ctx context.Context, file string) (map[string]string, error) {
 	paths := map[string]string{}
@@ -46,7 +53,7 @@ func sessionRolloutPaths(ctx context.Context, file string) (map[string]string, e
 	return paths, rows.Err()
 }
 
-// sessionStateDatabase selects the latest numbered state database directly inside the resolved SQLite home.
+// sessionStateDatabase accepts the supported state_5 contract and refuses unknown newer database versions.
 func sessionStateDatabase(directory string) (string, error) {
 	entries, err := os.ReadDir(directory)
 	if errors.Is(err, os.ErrNotExist) {
@@ -55,26 +62,40 @@ func sessionStateDatabase(directory string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	selected := ""
-	latest := -2
-	// Worktrees and backup subdirectories can contain unrelated databases; never recurse into them.
+	selected, older := "", false
+	// Codex chooses a fixed filename for its compatible release; numbering is not an active-database pointer.
 	for _, entry := range entries {
 		name := entry.Name()
-		version := -1
-		if name != "state.sqlite" {
-			if !strings.HasPrefix(name, "state_") || !strings.HasSuffix(name, ".sqlite") {
-				continue
-			}
-			version, err = strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(name, "state_"), ".sqlite"))
-			if err != nil || version < 0 {
-				continue
-			}
+		if name == "state.sqlite" {
+			older = true
+			continue
 		}
-		if version > latest {
-			selected, latest = filepath.Join(directory, name), version
+		if !strings.HasPrefix(name, "state_") || !strings.HasSuffix(name, ".sqlite") {
+			continue
+		}
+		version, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(name, "state_"), ".sqlite"))
+		if err != nil || version < 0 {
+			continue
+		}
+		if version > supportedSessionStateVersion ||
+			version == supportedSessionStateVersion && name != supportedSessionStateFilename {
+			return "", fmt.Errorf(
+				"unsupported state database %s; session selection and merging require Codex versions using state_5.sqlite; use full migration",
+				name,
+			)
+		}
+		if name == supportedSessionStateFilename {
+			selected = filepath.Join(directory, name)
+		} else {
+			older = true
 		}
 	}
 	if selected == "" {
+		if older {
+			return "", errors.New(
+				"unsupported state database: only older state versions exist; initialize a Codex version using state_5.sqlite or use full migration",
+			)
+		}
 		return "", nil
 	}
 	info, err := os.Lstat(selected)

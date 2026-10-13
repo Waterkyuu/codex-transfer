@@ -129,7 +129,7 @@ func TestSessionMergeRejectsSymbolicSQLiteDirectories(t *testing.T) {
 	}
 }
 
-// TestStagedSessionDatabaseScope follows nested configuration and selects the highest numeric database version.
+// TestStagedSessionDatabaseScope follows nested configuration and excludes older state versions.
 func TestStagedSessionDatabaseScope(t *testing.T) {
 	destination := t.TempDir()
 	plan, err := prepareInstallation([]Root{{Name: "codex", Path: destination}})
@@ -145,7 +145,7 @@ func TestStagedSessionDatabaseScope(t *testing.T) {
 	if err := os.MkdirAll(sqlite, 0700); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"state.sqlite", "state_9.sqlite", "state_10.sqlite", "state_backup.sqlite"} {
+	for _, name := range []string{"state.sqlite", "state_4.sqlite", "state_5.sqlite", "state_backup.sqlite"} {
 		if err := os.WriteFile(filepath.Join(sqlite, name), nil, 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -155,8 +155,59 @@ func TestStagedSessionDatabaseScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	files, err := stagedSessionDatabases(plan)
-	if err != nil || len(files) != 1 || files[0] != filepath.Join(sqlite, "state_10.sqlite") {
+	if err != nil || len(files) != 1 || files[0] != filepath.Join(sqlite, "state_5.sqlite") {
 		t.Fatalf("active state database = %v, %v", files, err)
+	}
+}
+
+// TestSessionStateDatabaseCompatibility rejects databases outside the supported state filename contract.
+func TestSessionStateDatabaseCompatibility(t *testing.T) {
+	cases := []struct {
+		// name identifies the supported or ambiguous database layout.
+		name string
+		// files lists direct children of the selected SQLite home.
+		files []string
+		// want is the selected filename, or empty when no database exists.
+		want string
+		// rejected indicates that the layout cannot identify a supported current database.
+		rejected bool
+	}{
+		{name: "empty", files: []string{}},
+		{name: "supported", files: []string{"state_5.sqlite"}, want: "state_5.sqlite"},
+		{
+			name:  "old alongside supported",
+			files: []string{"state.sqlite", "state_4.sqlite", "state_5.sqlite"},
+			want:  "state_5.sqlite",
+		},
+		{name: "legacy only", files: []string{"state.sqlite"}, rejected: true},
+		{name: "older only", files: []string{"state_4.sqlite"}, rejected: true},
+		{name: "newer only", files: []string{"state_6.sqlite"}, rejected: true},
+		{name: "newer alongside supported", files: []string{"state_5.sqlite", "state_6.sqlite"}, rejected: true},
+		{name: "backup", files: []string{"state_backup.sqlite"}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			for _, name := range test.files {
+				if err := os.WriteFile(filepath.Join(directory, name), nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			file, err := sessionStateDatabase(directory)
+			if test.rejected {
+				if err == nil || !strings.Contains(err.Error(), "unsupported state database") {
+					t.Fatalf("unsupported layout accepted: %s, %v", file, err)
+				}
+				return
+			}
+			want := ""
+			if test.want != "" {
+				want = filepath.Join(directory, test.want)
+			}
+			if err != nil || file != want {
+				t.Fatalf("database = %s, %v; want %s", file, err, want)
+			}
+		})
 	}
 }
 
@@ -192,5 +243,41 @@ func TestSessionSQLiteHomePrecedence(t *testing.T) {
 				t.Fatalf("SQLite home = %s, %v; want %s", got, err, want)
 			}
 		})
+	}
+}
+
+// TestSessionMergeRejectsUnknownDatabase leaves live data intact when the receiving database version is ambiguous.
+func TestSessionMergeRejectsUnknownDatabase(t *testing.T) {
+	destination := t.TempDir()
+	for _, name := range []string{"state_5.sqlite", "state_6.sqlite"} {
+		if err := os.WriteFile(filepath.Join(destination, name), []byte(name), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plan, err := prepareInstallation([]Root{{Name: "codex", Path: destination}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plan.close()
+	staged, err := plan.resolve("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeSessionFixture(t, staged, "sessions/new.jsonl", "new", "2026-10-01T00:00:00Z", "/dev/app")
+	if err := mergeSessionInstallation(
+		context.Background(),
+		plan,
+		io.Discard,
+	); err == nil ||
+		!strings.Contains(err.Error(), "unsupported state database") {
+		t.Fatalf("ambiguous receiving database accepted: %v", err)
+	}
+	for _, name := range []string{"state_5.sqlite", "state_6.sqlite"} {
+		if got, err := os.ReadFile(filepath.Join(destination, name)); err != nil || string(got) != name {
+			t.Fatalf("live database changed: %s, %v", got, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(destination, "sessions", "new.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("failed merge installed a session: %v", err)
 	}
 }

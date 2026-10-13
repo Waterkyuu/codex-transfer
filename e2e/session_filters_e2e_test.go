@@ -264,3 +264,36 @@ func runFilteredTransfer(t *testing.T, binary, source, destination string) strin
 	}
 	return sent + received
 }
+
+// TestCLIRejectsUnknownStateDatabase refuses a higher numbered database before connecting to a receiver.
+func TestCLIRejectsUnknownStateDatabase(t *testing.T) {
+	binary, source := buildCLI(t), t.TempDir()
+	writeFilteredSession(t, source, "sessions/new.jsonl", "new", "2026-10-01T00:00:00Z", "/dev/app-api", "current")
+	writeFilteredState(t, source, "new", "sessions/new.jsonl", false)
+	if err := os.WriteFile(
+		filepath.Join(source, ".codex", "state_6.sqlite"),
+		[]byte("unknown schema"),
+		0600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	command := exec.CommandContext(
+		ctx,
+		binary,
+		"send",
+		"127.0.0.1",
+		"--since",
+		"2026-10-01",
+		"--skip-process-check",
+		"--wait",
+		"1ms",
+	)
+	command.Env = fixtureEnvironment(source)
+	if output, err := command.CombinedOutput(); err == nil ||
+		!strings.Contains(string(output), "unsupported state database") ||
+		strings.Contains(string(output), "Waiting for receiver") {
+		t.Fatalf("unknown database accepted: %s, %v", output, err)
+	}
+}
