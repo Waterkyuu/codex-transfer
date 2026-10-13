@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -220,26 +219,4 @@ func validName(name string) bool {
 		}
 	}
 	return true
-}
-
-// CheckStopped refuses migration while a known Codex process can mutate persistent state.
-func CheckStopped() error {
-	command := exec.Command("ps", "-A", "-o", "comm=")
-	if runtime.GOOS == "windows" {
-		command = exec.Command("tasklist", "/FO", "CSV", "/NH")
-	}
-	output, err := command.Output()
-	if err != nil {
-		return fmt.Errorf("check Codex processes: %w", err)
-	}
-	for _, line := range strings.Split(string(output), "\n") {
-		line = strings.ToLower(strings.TrimSpace(line))
-		base := filepath.Base(line)
-		knownCLI := base == "codex" || base == "codex.exe" || base == "codex-app-server"
-		knownApp := strings.Contains(line, "/codex.app/") || strings.HasPrefix(line, `"codex.exe"`)
-		if knownCLI || knownApp {
-			return errors.New("codex is running; quit Codex Desktop, CLI, IDE extensions, and daemon before migration")
-		}
-	}
-	return nil
 }
