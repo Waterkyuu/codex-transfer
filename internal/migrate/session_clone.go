@@ -24,11 +24,12 @@ func cloneSessionTarget(ctx context.Context, item *installItem) error {
 	before := map[string]fs.FileInfo{}
 	directories := []string{}
 	// Valid Unix filenames can contain ':' or '\\'; a local clone must not use portable tar extraction.
-	err := filepath.WalkDir(item.target, func(source string, entry fs.DirEntry, walkErr error) error {
+	err := filepath.WalkDir(item.target, func(source string, _ fs.DirEntry, walkErr error) error {
 		if err := errors.Join(ctx.Err(), walkErr); err != nil {
 			return err
 		}
-		info, err := entry.Info()
+		// Windows directory enumeration can cache metadata; both snapshots must query the live path.
+		info, err := os.Lstat(source)
 		if err != nil {
 			return err
 		}
@@ -61,11 +62,11 @@ func cloneSessionTarget(ctx context.Context, item *installItem) error {
 		return err
 	}
 	seen := 0
-	err = filepath.WalkDir(item.target, func(source string, entry fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(item.target, func(source string, _ fs.DirEntry, walkErr error) error {
 		if err := errors.Join(ctx.Err(), walkErr); err != nil {
 			return err
 		}
-		info, err := entry.Info()
+		info, err := os.Lstat(source)
 		if err != nil {
 			return err
 		}

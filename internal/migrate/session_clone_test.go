@@ -9,6 +9,34 @@ import (
 	"testing"
 )
 
+// TestCloneSessionTargetNestedDirectories preserves freshly populated receiving directories on every platform.
+func TestCloneSessionTargetNestedDirectories(t *testing.T) {
+	target := t.TempDir()
+	for _, name := range []string{"sessions/2026/10/13", "archived_sessions", "worktrees/project/testdata"} {
+		directory := filepath.Join(target, filepath.FromSlash(name))
+		if err := os.MkdirAll(directory, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, "keep"), []byte(name), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	i, err := prepareInstallation([]Root{{Name: "codex", Path: target}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.close()
+	if err := cloneSessionTarget(context.Background(), i.items[0]); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"sessions/2026/10/13", "archived_sessions", "worktrees/project/testdata"} {
+		path := filepath.Join(i.items[0].slot, "data", filepath.FromSlash(name), "keep")
+		if data, err := os.ReadFile(path); err != nil || string(data) != name {
+			t.Fatalf("nested receiving data changed: %q, %v", data, err)
+		}
+	}
+}
+
 // TestCloneSessionTargetPreservesNativeNames keeps receiving files outside the portable archive contract.
 func TestCloneSessionTargetPreservesNativeNames(t *testing.T) {
 	if runtime.GOOS == "windows" {
