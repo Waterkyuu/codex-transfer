@@ -33,6 +33,23 @@ func TestTransferEndToEnd(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, ".codex-global-state.json"), metadata, 0600); err != nil {
 		t.Fatal(err)
 	}
+	opaque := map[string]string{
+		"worktrees/app/config.toml":              "root = 42\n",
+		"worktrees/app/.codex-global-state.json": "unrelated project metadata",
+		"worktrees/app/state_5.sqlite":           "unrelated project database",
+		"worktrees/app/sessions/example.jsonl":   "unrelated project sessions",
+		"plugins/cache/config.toml":              "cwd = '/example-only'\n",
+		"unrelated.sqlite":                       "unrelated top-level database",
+	}
+	for name, contents := range opaque {
+		file := filepath.Join(source, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +73,12 @@ func TestTransferEndToEnd(t *testing.T) {
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+	for name, contents := range opaque {
+		got, err := os.ReadFile(filepath.Join(destination, filepath.FromSlash(name)))
+		if err != nil || string(got) != contents {
+			t.Fatalf("opaque project file %s changed: %q, %v", name, got, err)
+		}
 	}
 	got, err := os.ReadFile(filepath.Join(destination, "history.jsonl"))
 	if err != nil || string(got) != "synthetic history" {
