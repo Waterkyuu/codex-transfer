@@ -60,6 +60,10 @@ func TestSendValidation(t *testing.T) {
 		{"send", "example.com"},
 		{"send", "127.0.0.1", "--port", "0"},
 		{"send", "127.0.0.1", "--wait", "-1s"},
+		{"send", "127.0.0.1", "--workers", "-1"},
+		{"send", "127.0.0.1", "--compression", "unsupported"},
+		{"receive", "--workers", "257"},
+		{"receive", "--archive-dir", "relative"},
 	} {
 		var output bytes.Buffer
 		app := &application{input: strings.NewReader(""), output: &output, version: "development"}

@@ -52,11 +52,19 @@ type options struct {
 	skipCheck bool
 	// all includes missing conventional locations in path output.
 	all bool
+	// workers sets parallel CPU processing; zero uses the runtime CPU budget.
+	workers int
+	// compression selects sender CPU effort or disables compression for a fast local network.
+	compression string
+	// importRoot selects where unchanged foreign snapshots are preserved.
+	importRoot string
+	// pathMappings overrides source project prefixes independently of root installation paths.
+	pathMappings pathFlags
 }
 
 // parseOptions supports the documented IP-first send syntax and rejects unused arguments.
 func (a *application) parseOptions(command string, args []string) (*options, []string, error) {
-	values := &options{extra: pathFlags{}, mappings: pathFlags{}}
+	values := &options{extra: pathFlags{}, mappings: pathFlags{}, pathMappings: pathFlags{}}
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(a.output)
 	flags.StringVar(&values.codexHome, "codex-home", os.Getenv("CODEX_HOME"), "Codex state root (default ~/.codex)")
@@ -69,8 +77,15 @@ func (a *application) parseOptions(command string, args []string) (*options, []s
 	)
 	if command == "send" || command == "receive" {
 		flags.IntVar(&values.port, "port", 7432, "TCP port (1-65535)")
+		flags.IntVar(&values.workers, "workers", 0, "Parallel CPU workers (0: runtime CPU budget, 1-256: explicit)")
 	}
 	if command == "send" {
+		flags.StringVar(
+			&values.compression,
+			"compression",
+			"fast",
+			"Archive compression: fast, balanced, best, or none",
+		)
 		flags.DurationVar(&values.wait, "wait", 5*time.Minute, "Maximum wait for receiver startup")
 		flags.StringVar(&values.fingerprint, "fingerprint", "", "Optional receiver certificate SHA-256 pin")
 	}
@@ -78,6 +93,13 @@ func (a *application) parseOptions(command string, args []string) (*options, []s
 		flags.StringVar(&values.listen, "listen", "0.0.0.0", "Literal local IPv4 or IPv6 bind address")
 		flags.Int64Var(&values.maxGiB, "max-gib", 1024, "Maximum received archive size in GiB")
 		flags.Var(&values.mappings, "map", "Named destination NAME=/path (repeatable)")
+		flags.StringVar(
+			&values.importRoot,
+			"archive-dir",
+			"",
+			"Preserve unchanged foreign snapshots (default ~/.codex-transfer/imports)",
+		)
+		flags.Var(&values.pathMappings, "path-map", "Source path prefix SOURCE=/local/path (repeatable)")
 	} else {
 		flags.Var(&values.extra, "extra", "Additional source NAME=/path (repeatable)")
 	}
@@ -92,6 +114,11 @@ func (a *application) parseOptions(command string, args []string) (*options, []s
 	}
 	positional := flags.Args()
 	if command == "send" {
+		switch values.compression {
+		case "fast", "balanced", "best", "none":
+		default:
+			return nil, positional, errors.New("compression must be fast, balanced, best, or none")
+		}
 		if len(positional) != 1 {
 			return nil, positional, errors.New("send requires exactly one receiver IP")
 		}
@@ -102,6 +129,12 @@ func (a *application) parseOptions(command string, args []string) (*options, []s
 		return nil, positional, errors.New("unexpected positional arguments")
 	}
 	if command == "send" || command == "receive" {
+		if values.workers < 0 || values.workers > 256 {
+			return nil, positional, errors.New("workers must be between 0 and 256")
+		}
+		if values.importRoot != "" && !filepath.IsAbs(values.importRoot) {
+			return nil, positional, errors.New("archive-dir must be an absolute path")
+		}
 		if values.port < 1 || values.port > 65535 {
 			return nil, positional, errors.New("port must be between 1 and 65535")
 		}
