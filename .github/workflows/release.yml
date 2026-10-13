@@ -46,18 +46,33 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Check npm publishing credentials
+        id: credentials
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [[ -n "$NODE_AUTH_TOKEN" ]]; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo 'npm publication skipped: configure NPM_TOKEN to publish the package.' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: steps.credentials.outputs.available == 'true'
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        if: steps.credentials.outputs.available == 'true'
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
       - name: Set package version from release tag
+        if: steps.credentials.outputs.available == 'true'
         working-directory: npm
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: npm version "${RELEASE_TAG#v}" --no-git-tag-version --ignore-scripts
       - name: Publish npm package
+        if: steps.credentials.outputs.available == 'true'
         working-directory: npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
