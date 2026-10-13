@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Usage and migration guide / 使用与迁移指南
+    url: https://github.com/Waterkyuu/codex-transfer#readme
+    about: Read the commands, platform support, and migration details. / 查看命令、平台支持和迁移说明。
