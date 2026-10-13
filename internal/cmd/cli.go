@@ -51,6 +51,8 @@ func (a *application) run(ctx context.Context, args []string) error {
 		return nil
 	case "address":
 		return a.address(args[1:])
+	case "workspaces", "clear-sessions":
+		return a.workspaces(ctx, args[0], args[1:])
 	case "paths", "check", "send", "receive":
 		return a.migration(ctx, args[0], args[1:])
 	default:
@@ -66,6 +68,8 @@ Usage:
   codex-transfer --version                     Show the installed release version
   codex-transfer address                       Show local IP addresses
   codex-transfer paths [options]               Show data roots included on this computer
+  codex-transfer workspaces [--details]        Show conversation file sizes per workspace
+  codex-transfer clear-sessions [options]      Clear selected or all chats with two confirmations
   codex-transfer check [options]               Check local Codex shutdown and data paths
   codex-transfer receive [options]             Wait for a sender (default TCP port 7432)
   codex-transfer send <receiver-ip> [options]   Wait for the other terminal and send
