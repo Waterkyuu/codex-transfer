@@ -14,8 +14,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          # Match the Go toolchain used to build the pinned analyzer.
-          go-version: '1.27.x'
+          # Pin the verified patch; newer export formats may require a newer analyzer.
+          go-version: '1.27.1'
           cache: false
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
@@ -33,6 +33,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         go: ['1.22.x', stable]
     runs-on: ${{ matrix.os }}
+    env:
+      # Recent macOS loaders require LC_UUID, which Go 1.22's internal linker omits.
+      GOFLAGS: ${{ matrix.os == 'macos-latest' && matrix.go == '1.22.x' && '-ldflags=-linkmode=external' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -41,7 +44,12 @@ jobs:
           cache: false
       - name: Check formatting
         shell: bash
-        run: test -z "$(gofmt -l cmd internal e2e)"
+        run: |
+          unformatted="$(gofmt -l cmd internal e2e)"
+          if [ -n "$unformatted" ]; then
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
       - name: Static analysis
         run: go vet ./...
       - name: Unit and CLI end-to-end tests with race detection
