@@ -219,6 +219,24 @@ codex-transfer send 192.168.1.20 --extra project-data=/absolute/source
 
 Repeat `--extra` and `--map` for multiple roots. Names must match between computers and paths must not overlap. Use `--codex-home` or `--sqlite-home` to select custom Codex state locations.
 
+## Quit Codex before migration or clearing
+
+Run this from a separate terminal on each computer before transferring or clearing local conversations:
+
+```sh
+codex-transfer quit-codex
+codex-transfer quit-codex --timeout 1m
+```
+
+The command requests normal exit for detected Codex Desktop, CLI, and app-server processes,
+then verifies they have stopped. It succeeds when Codex is already stopped and waits up to
+20 seconds by default. On macOS, Desktop receives a native application quit event; standalone
+terminal processes receive `SIGTERM`. Linux uses `SIGTERM`. Windows uses `taskkill` without
+`/F`; Windows may refuse normal closing for console processes, which must then be closed manually.
+The command reports permission failures and timeouts and never escalates to forced termination.
+Migration and clearing still check shutdown themselves. Run the quit command outside Codex,
+because closing the host application can interrupt a command launched from its own terminal.
+
 ## Inspect and clear conversation storage
 
 List conversation storage grouped by full workspace path:
@@ -280,6 +298,7 @@ Use `--codex-home` and `--sqlite-home` with either command for custom data locat
 | `address` | Show local IP addresses and connection examples. |
 | `paths --all` | Show all conventional data roots, including missing locations. |
 | `check` | Check local Codex shutdown and data availability. |
+| `quit-codex` | Request normal Codex exit and verify shutdown. |
 | `workspaces [--details]` | Show conversation file sizes per workspace and optional session IDs. |
 | `clear-sessions` | Clear selected or all conversations after two confirmations. |
 | `receive` | Wait for one approved transfer and install the received data. |

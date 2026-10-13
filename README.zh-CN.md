@@ -195,6 +195,17 @@ codex-transfer send 192.168.1.20 --extra project-data=/absolute/source
 
 可以重复使用 `--extra` 和 `--map` 添加多个根。两端名称必须一致，路径不能重叠。自定义 Codex 状态位置可使用 `--codex-home` 或 `--sqlite-home`。
 
+## 传输或清理前退出 Codex
+
+在两台电脑上分别打开独立终端，传输或清理本地会话前执行：
+
+```sh
+codex-transfer quit-codex
+codex-transfer quit-codex --timeout 1m
+```
+
+命令会向检测到的 Codex 桌面端、CLI 和 app-server 进程请求正常退出，并确认进程已经停止。Codex 已退出时直接成功；默认最多等待 20 秒。macOS 桌面端使用系统应用退出事件，独立终端进程使用 `SIGTERM`；Linux 使用 `SIGTERM`。Windows 使用不带 `/F` 的 `taskkill`，部分控制台进程可能拒绝正常关闭，此时需要手动退出。权限不足或等待超时会明确报错，不会自动升级为强制结束进程。传输和清理命令仍会自行检查退出状态。请从 Codex 之外的独立终端运行，因为关闭宿主应用可能中断从其内部终端启动的命令。
+
 ## 查看和清理会话存储
 
 按工作区完整路径列出会话文件大小：
@@ -235,6 +246,7 @@ codex-transfer clear-sessions --all
 | `address` | 查看本机 IP 和连接示例。 |
 | `paths --all` | 查看所有标准数据根，包括尚不存在的位置。 |
 | `check` | 检查本机 Codex 是否退出及数据是否存在。 |
+| `quit-codex` | 请求 Codex 正常退出并确认进程已停止。 |
 | `workspaces [--details]` | 查看各工作区的会话文件大小，可选列出会话 ID。 |
 | `clear-sessions` | 两次确认后清理部分或全部聊天。 |
 | `receive` | 等待一次已确认的传输，并安装接收到的数据。 |
