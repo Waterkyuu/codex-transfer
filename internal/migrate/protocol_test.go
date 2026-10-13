@@ -163,6 +163,9 @@ func TestOfferValidation(t *testing.T) {
 		"unmapped":  func(m *message) { m.Roots = []string{"foreign"} },
 		"duplicate": func(m *message) { m.Roots = []string{"codex", "codex"} },
 		"checksum":  func(m *message) { m.SHA256 = "invalid" },
+		"raw-size":  func(m *message) { m.RawSize = 1025 },
+		"encoding":  func(m *message) { m.Encoding = "unknown" },
+		"gzip-size": func(m *message) { m.Encoding = "gzip" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

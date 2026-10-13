@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -28,10 +30,20 @@ type Sender struct {
 	Check func() error
 	// Wait limits connection retries; zero selects five minutes.
 	Wait time.Duration
+	// Workers selects parallel compression workers; zero uses the runtime CPU budget.
+	Workers int
+	// Compression selects fast, balanced, best, or none; the default favors throughput.
+	Compression string
 }
 
 // Send waits for a receiver, authenticates the session, and returns only after installation acknowledgement.
 func (s *Sender) Send(ctx context.Context, address string) error {
+	started := time.Now()
+	for _, root := range s.Roots {
+		if root.Name == sourceArchiveRoot {
+			return errors.New("source root name is reserved for receiver preservation")
+		}
+	}
 	if s.Output == nil {
 		s.Output = io.Discard
 	}
@@ -44,7 +56,7 @@ func (s *Sender) Send(ctx context.Context, address string) error {
 		}
 	}
 	_, _ = fmt.Fprintln(s.Output, "Preparing a consistent local snapshot...")
-	bundle, err := SnapshotContext(ctx, s.Roots)
+	bundle, err := snapshot(ctx, s.Roots, s.Workers, s.Compression)
 	if err != nil {
 		return err
 	}
@@ -55,6 +67,8 @@ func (s *Sender) Send(ctx context.Context, address string) error {
 		float64(bundle.Size)/(1<<20),
 		bundle.Skipped,
 	)
+	_, _ = fmt.Fprintf(s.Output, "Archive encoding: %s; raw: %.2f MiB; network: %.2f MiB\n",
+		bundle.Encoding, float64(bundle.RawSize)/(1<<20), float64(bundle.Size)/(1<<20))
 	connection, err := s.connect(ctx, address)
 	if err != nil {
 		return err
@@ -76,11 +90,37 @@ func (s *Sender) Send(ctx context.Context, address string) error {
 			return err
 		}
 	}
+	statePaths := map[string]string{}
 	names := make([]string, 0, len(s.Roots))
+	paths := make(map[string]string, len(s.Roots))
 	for _, root := range s.Roots {
 		names = append(names, root.Name)
+		absolute, err := filepath.Abs(root.Path)
+		if err != nil {
+			return err
+		}
+		paths[root.Name] = absolute
+		if root.Name == "codex" {
+			configured, err := configuredPaths(filepath.Join(root.Path, "config.toml"))
+			if err != nil {
+				return err
+			}
+			for key, value := range configured {
+				statePaths[key], err = filepath.Abs(value)
+				if err != nil {
+					return err
+				}
+			}
+		}
 	}
-	hello := message{Kind: "offer", OS: runtime.GOOS, Roots: names, Size: bundle.Size, SHA256: bundle.SHA256}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	hello := message{
+		Kind: "offer", OS: runtime.GOOS, Home: home, Paths: paths, StatePaths: statePaths, Roots: names,
+		Encoding: bundle.Encoding, RawSize: bundle.RawSize, Size: bundle.Size, SHA256: bundle.SHA256,
+	}
 	if err := writeMessage(connection, hello); err != nil {
 		return err
 	}
@@ -113,6 +153,14 @@ func (s *Sender) Send(ctx context.Context, address string) error {
 		}
 		break
 	}
+	elapsed := time.Since(started).Seconds()
+	_, _ = fmt.Fprintf(
+		s.Output,
+		"Overall: %.2f MiB of source data in %.2fs (%.2f MiB/s, including preparation and installation).\n",
+		float64(bundle.RawSize)/(1<<20),
+		elapsed,
+		float64(bundle.RawSize)/(1<<20)/elapsed,
+	)
 	_, _ = fmt.Fprintln(s.Output, "Migration complete. Source data retained; destination backups retained.")
 	return nil
 }

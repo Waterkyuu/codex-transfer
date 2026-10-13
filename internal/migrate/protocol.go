@@ -22,7 +22,7 @@ import (
 
 const (
 	// protocolVersion rejects incompatible framing and installation semantics.
-	protocolVersion = 1
+	protocolVersion = 2
 	// maxFrame bounds memory allocated for an untrusted control message.
 	maxFrame = 1 << 20
 	// idleTimeout bounds every network read and write, while allowing long transfers.
@@ -35,8 +35,18 @@ type message struct {
 	Version int `json:"version"`
 	// Kind names the expected handshake or transfer phase.
 	Kind string `json:"kind"`
-	// OS prevents raw database migration across unsupported platform combinations.
+	// OS selects platform-specific source interpretation without controlling receiver destinations.
 	OS string `json:"os,omitempty"`
+	// Home supplies a source prefix used only for structured path translation.
+	Home string `json:"home,omitempty"`
+	// Paths maps root names to source prefixes used only for structured path translation.
+	Paths map[string]string `json:"paths,omitempty"`
+	// StatePaths resolves top-level config paths relative to the sender's working directory.
+	StatePaths map[string]string `json:"state_paths,omitempty"`
+	// Encoding selects bounded gzip members or an uncompressed tar stream.
+	Encoding string `json:"encoding,omitempty"`
+	// RawSize independently bounds the decompressed tar stream.
+	RawSize int64 `json:"raw_size,omitempty"`
 	// Roots lists portable root identifiers without exposing source absolute paths.
 	Roots []string `json:"roots,omitempty"`
 	// Size bounds the exact archive payload on the connection.
