@@ -34,6 +34,8 @@ type Sender struct {
 	Workers int
 	// Compression selects fast, balanced, best, or none; the default favors throughput.
 	Compression string
+	// Filter selects session-only merging; nil retains complete root migration.
+	Filter *SessionFilter
 }
 
 // Send waits for a receiver, authenticates the session, and returns only after installation acknowledgement.
@@ -56,7 +58,40 @@ func (s *Sender) Send(ctx context.Context, address string) error {
 		}
 	}
 	_, _ = fmt.Fprintln(s.Output, "Preparing a consistent local snapshot...")
-	bundle, err := snapshot(ctx, s.Roots, s.Workers, s.Compression)
+	roots := s.Roots
+	var bundle *Bundle
+	var err error
+	if s.Filter != nil {
+		roots = []Root{}
+		for _, root := range s.Roots {
+			if root.Name == "codex" {
+				absolute, err := filepath.Abs(root.Path)
+				if err != nil {
+					return err
+				}
+				root.Path = absolute
+				roots = append(roots, root)
+			}
+		}
+		if len(roots) != 1 {
+			return errors.New("session filtering requires exactly one Codex source root")
+		}
+		if err := ValidateRoots(roots); err != nil {
+			return err
+		}
+		selected, count, selectionErr := s.Filter.selectFiles(ctx, roots[0].Path)
+		if selectionErr != nil {
+			return selectionErr
+		}
+		_, _ = fmt.Fprintf(
+			s.Output,
+			"Selected sessions: %d. Only rollouts will be sent; receiving sessions will be merged.\n",
+			count,
+		)
+		bundle, err = snapshotFiles(ctx, roots, s.Workers, s.Compression, selected)
+	} else {
+		bundle, err = snapshot(ctx, roots, s.Workers, s.Compression)
+	}
 	if err != nil {
 		return err
 	}
@@ -91,16 +126,16 @@ func (s *Sender) Send(ctx context.Context, address string) error {
 		}
 	}
 	statePaths := map[string]string{}
-	names := make([]string, 0, len(s.Roots))
-	paths := make(map[string]string, len(s.Roots))
-	for _, root := range s.Roots {
+	names := make([]string, 0, len(roots))
+	paths := make(map[string]string, len(roots))
+	for _, root := range roots {
 		names = append(names, root.Name)
 		absolute, err := filepath.Abs(root.Path)
 		if err != nil {
 			return err
 		}
 		paths[root.Name] = absolute
-		if root.Name == "codex" {
+		if root.Name == "codex" && s.Filter == nil {
 			configured, err := configuredPaths(filepath.Join(root.Path, "config.toml"))
 			if err != nil {
 				return err
@@ -121,6 +156,9 @@ func (s *Sender) Send(ctx context.Context, address string) error {
 		Kind: "offer", OS: runtime.GOOS, Home: home, Paths: paths, StatePaths: statePaths, Roots: names,
 		Encoding: bundle.Encoding, RawSize: bundle.RawSize, Size: bundle.Size, SHA256: bundle.SHA256,
 	}
+	if s.Filter != nil {
+		hello.Version, hello.Mode = sessionProtocolVersion, "sessions"
+	}
 	if err := writeMessage(connection, hello); err != nil {
 		return err
 	}
@@ -130,6 +168,9 @@ func (s *Sender) Send(ctx context.Context, address string) error {
 	}
 	if ready.Kind != "ready" {
 		return errors.New("receiver did not announce readiness")
+	}
+	if s.Filter != nil && (ready.Version != sessionProtocolVersion || ready.Mode != "sessions") {
+		return errors.New("receiver does not support session merging; upgrade codex-transfer on both computers")
 	}
 	_, _ = fmt.Fprintln(s.Output, "Both terminals are ready. Sending encrypted data...")
 	p := newProgress(s.Output, bundle.Size)

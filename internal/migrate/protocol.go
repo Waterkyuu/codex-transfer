@@ -23,6 +23,8 @@ import (
 const (
 	// protocolVersion rejects incompatible framing and installation semantics.
 	protocolVersion = 2
+	// sessionProtocolVersion prevents older receivers from interpreting a sparse archive as a full replacement.
+	sessionProtocolVersion = 3
 	// maxFrame bounds memory allocated for an untrusted control message.
 	maxFrame = 1 << 20
 	// idleTimeout bounds every network read and write, while allowing long transfers.
@@ -35,6 +37,8 @@ type message struct {
 	Version int `json:"version"`
 	// Kind names the expected handshake or transfer phase.
 	Kind string `json:"kind"`
+	// Mode requests session merging; empty retains the full-root replacement contract.
+	Mode string `json:"mode,omitempty"`
 	// OS selects platform-specific source interpretation without controlling receiver destinations.
 	OS string `json:"os,omitempty"`
 	// Home supplies a source prefix used only for structured path translation.
@@ -97,7 +101,9 @@ func pairingCode(connection *tls.Conn) (string, error) {
 
 // writeMessage emits a length-delimited JSON frame with a bounded write deadline.
 func writeMessage(connection net.Conn, value message) error {
-	value.Version = protocolVersion
+	if value.Version == 0 {
+		value.Version = protocolVersion
+	}
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -139,7 +145,7 @@ func readMessage(connection net.Conn) (message, error) {
 	if err := json.Unmarshal(data, &value); err != nil {
 		return value, err
 	}
-	if value.Version != protocolVersion {
+	if value.Version != protocolVersion && value.Version != sessionProtocolVersion {
 		return value, errors.New("incompatible transfer protocol")
 	}
 	if value.Error != "" {

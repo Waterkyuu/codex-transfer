@@ -197,7 +197,7 @@ func (r *Receiver) receive(ctx context.Context, connection *tls.Conn) error {
 		return err
 	}
 	defer func() { _ = archive.Close() }()
-	if err := writeMessage(connection, message{Kind: "ready"}); err != nil {
+	if err := writeMessage(connection, message{Kind: "ready", Version: hello.Version, Mode: hello.Mode}); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintln(r.Output, "Both terminals are ready. Receiving encrypted data...")
@@ -246,7 +246,14 @@ func (r *Receiver) receive(ctx context.Context, connection *tls.Conn) error {
 	}
 	closeDecoder()
 	if err == nil && len(mapper.mappings) > 0 {
-		err = adaptInstallation(ctx, installation, mapper, r.Workers)
+		if hello.Mode == "sessions" {
+			err = adaptSessionInstallation(ctx, installation, mapper, r.Workers)
+		} else {
+			err = adaptInstallation(ctx, installation, mapper, r.Workers)
+		}
+	}
+	if err == nil && hello.Mode == "sessions" {
+		err = mergeSessionInstallation(ctx, installation, r.Output)
 	}
 	if err == nil && plan.cross {
 		manifest, marshalErr := json.MarshalIndent(hello, "", "  ")
@@ -294,6 +301,16 @@ func (r *Receiver) receive(ctx context.Context, connection *tls.Conn) error {
 
 // validateOffer validates platform metadata and plans active imports plus source preservation.
 func (r *Receiver) validateOffer(hello message) (*receivePlan, error) {
+	if hello.Mode != "" && hello.Mode != "sessions" {
+		return nil, errors.New("unsupported transfer mode")
+	}
+	if hello.Mode == "sessions" {
+		if hello.Version != sessionProtocolVersion || len(hello.Roots) != 1 || hello.Roots[0] != "codex" {
+			return nil, errors.New("session merging requires protocol 3 and only the Codex root")
+		}
+	} else if hello.Version == sessionProtocolVersion {
+		return nil, errors.New("protocol 3 requires session merging")
+	}
 	if hello.Kind != "offer" || !supportedOS(hello.OS) {
 		return nil, errors.New("invalid offer or unsupported source platform")
 	}
@@ -316,6 +333,22 @@ func (r *Receiver) validateOffer(hello message) (*receivePlan, error) {
 	plan, err := planDestinations(hello.OS, runtime.GOOS, hello.Roots, r.Targets, r.Overrides, r.ImportRoot)
 	if err != nil {
 		return nil, err
+	}
+	if hello.Mode == "sessions" {
+		target := r.Targets["sqlite"]
+		if override := r.Overrides["sqlite"]; override != "" {
+			target = override
+		}
+		if target != "" {
+			if _, err := os.Lstat(target); err == nil {
+				plan.roots = append(plan.roots, Root{Name: "sqlite", Path: target})
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return nil, err
+			}
+		}
+		if err := ValidateRoots(plan.roots); err != nil {
+			return nil, err
+		}
 	}
 	if plan.cross && (hello.Home == "" || len(hello.Paths) != len(hello.Roots)) {
 		return nil, errors.New("cross-system migration requires complete source path metadata")
@@ -354,6 +387,9 @@ func (r *Receiver) offerMapper(hello message, plan *receivePlan) (*pathMapper, e
 	mapper, err := newPathMapper(hello.OS, mappings)
 	if err != nil {
 		return nil, err
+	}
+	if hello.Mode == "sessions" {
+		return mapper, nil
 	}
 	for key, source := range hello.StatePaths {
 		mapper.statePaths[key] = mapper.remap(source)
