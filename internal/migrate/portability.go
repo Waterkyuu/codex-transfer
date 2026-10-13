@@ -107,17 +107,23 @@ func adaptInstallation(ctx context.Context, installation *installation, mapper *
 				if walkErr != nil {
 					return walkErr
 				}
-				base := entry.Name()
-				selected := base == "config.toml" || base == ".codex-global-state.json" ||
-					strings.HasSuffix(
-						base,
-						".sqlite",
-					) || (strings.HasSuffix(base, ".jsonl") || strings.HasSuffix(base, ".jsonl.zst")) &&
-					(strings.Contains(filepath.ToSlash(file), "/sessions/") || strings.Contains(filepath.ToSlash(file), "/archived_sessions/"))
-				if !entry.Type().IsRegular() || !selected {
+				if !entry.Type().IsRegular() {
 					return nil
 				}
-				if strings.HasSuffix(base, ".sqlite") {
+				base := entry.Name()
+				isConfig := base == "config.toml"
+				isGlobalState := base == ".codex-global-state.json"
+				isDatabase := strings.HasSuffix(base, ".sqlite")
+				isRollout := strings.HasSuffix(base, ".jsonl") || strings.HasSuffix(base, ".jsonl.zst")
+				portablePath := filepath.ToSlash(file)
+				inSessionDirectory := strings.Contains(portablePath, "/sessions/") ||
+					strings.Contains(portablePath, "/archived_sessions/")
+				// Rollout suffixes outside session directories must not select unrelated JSONL files.
+				selected := isConfig || isGlobalState || isDatabase || (isRollout && inSessionDirectory)
+				if !selected {
+					return nil
+				}
+				if isDatabase {
 					databases = append(databases, file)
 					return nil
 				}
