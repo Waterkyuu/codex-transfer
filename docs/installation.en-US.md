@@ -100,7 +100,9 @@ goreleaser release --snapshot --skip=publish --clean
 
 Run the Windows installer fixture with `pwsh -NoProfile -File scripts/install.test.ps1`. Temporary archives, caches, and binaries must remain untracked. `dist/`, `npm/vendor/`, `node_modules/`, and npm tarballs are ignored.
 
-Configure GitHub Actions write permissions and `NPM_TOKEN` with scope publishing access and the account's required 2FA policy. After installer checks pass on macOS/Linux/Windows, pushing a valid version tag triggers publication:
+The `release.yml` workflow publishes npm packages using [trusted publishing](https://docs.npmjs.com/trusted-publishers/) with OIDC. In the npm settings for `codex-transfer`, authorize GitHub Actions with owner `Waterkyuu`, repository `codex-transfer`, workflow filename `release.yml`, and permission to run `npm publish`. Leave the environment field empty. This workflow uses a GitHub-hosted runner, Node.js 24, and job-scoped `id-token: write`; no `NPM_TOKEN` is needed. A new trust configuration must complete its first successful publication within two days or it expires.
+
+After code and installer checks pass on macOS/Linux/Windows, pushing a valid version tag creates the native Release and then publishes the matching npm package:
 
 ```sh
 git tag v1.2.3

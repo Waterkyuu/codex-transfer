@@ -100,7 +100,9 @@ goreleaser release --snapshot --skip=publish --clean
 
 Windows 原生安装器测试：`pwsh -NoProfile -File scripts/install.test.ps1`。临时下载、归档、npm 缓存和二进制不加入 Git。`dist/`、`npm/vendor/`、`node_modules/` 与 npm tarball 已忽略。
 
-配置 GitHub Actions 的写入权限，以及 npm 发布所需的 `NPM_TOKEN`（有该 scope 发布权限并符合账号 2FA 策略）。安装器 CI 在 macOS/Linux/Windows 检查通过后，推送合法 `vX.Y.Z` 标签会触发发布工作流：
+`release.yml` 使用 OIDC [可信发布](https://docs.npmjs.com/trusted-publishers/) 自动发布 npm 包。在 npm 的 `codex-transfer` 设置中授权 GitHub Actions：所有者为 `Waterkyuu`，仓库为 `codex-transfer`，工作流文件名为 `release.yml`，允许执行 `npm publish`，环境字段留空。流程使用 GitHub 托管 runner、Node.js 24 和仅限 npm job 的 `id-token: write` 权限，无需配置 `NPM_TOKEN`。新建的可信发布配置必须在两天内首次成功发布，否则会过期。
+
+三系统代码与安装器检查通过后，推送合法版本标签会先创建原生 Release，再发布对应版本的 npm 包：
 
 ```sh
 git tag v1.2.3

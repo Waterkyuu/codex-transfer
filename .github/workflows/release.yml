@@ -6,7 +6,7 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 permissions:
-  contents: write
+  contents: read
 jobs:
   code-checks:
     uses: ./.github/workflows/ci.yml
@@ -15,6 +15,8 @@ jobs:
   release:
     needs: [code-checks, installer-checks]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -45,40 +47,29 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
     steps:
-      - name: Check npm publishing credentials
-        id: credentials
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [[ -n "$NODE_AUTH_TOKEN" ]]; then
-            echo 'available=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'available=false' >> "$GITHUB_OUTPUT"
-            echo 'npm publication skipped: configure NPM_TOKEN to publish the package.' >> "$GITHUB_STEP_SUMMARY"
-          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: steps.credentials.outputs.available == 'true'
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        if: steps.credentials.outputs.available == 'true'
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
       - name: Set package version from release tag
-        if: steps.credentials.outputs.available == 'true'
         working-directory: npm
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: npm version "${RELEASE_TAG#v}" --no-git-tag-version --ignore-scripts
-      - name: Publish npm package
-        if: steps.credentials.outputs.available == 'true'
-        working-directory: npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          test -n "$NODE_AUTH_TOKEN" || { echo 'Configure NPM_TOKEN before publishing.' >&2; exit 1; }
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo 'Expected a release tag such as v1.2.3 or v1.2.3-rc.1.' >&2
+            exit 1
+          fi
+          npm version "${RELEASE_TAG#v}" --no-git-tag-version --ignore-scripts
+      - name: Publish npm package with OIDC
+        working-directory: npm
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
           channel=latest
           if [[ "$RELEASE_TAG" == *-* ]]; then channel=next; fi
-          npm publish --access public --tag "$channel" --ignore-scripts
+          npm publish --access public --tag "$channel" --ignore-scripts --provenance
