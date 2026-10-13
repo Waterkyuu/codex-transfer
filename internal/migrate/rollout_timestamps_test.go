@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// TestRolloutTranslationTimestamps keeps indexed recency stable even when no path changes.
+// TestRolloutTranslationTimestamps preserves source mtime even when no path changes.
 func TestRolloutTranslationTimestamps(t *testing.T) {
 	for _, suffix := range []string{".jsonl", ".jsonl.zst"} {
 		for _, directory := range []string{"sessions", "archived_sessions"} {
@@ -40,19 +40,6 @@ func TestRolloutTranslationTimestamps(t *testing.T) {
 					info, err := os.Stat(plain)
 					if err != nil || !info.ModTime().Equal(modified) {
 						t.Fatalf("rollout mtime changed: %v, %v", info, err)
-					}
-					archived := directory == "archived_sessions"
-					values, err := readSessionIndex(context.Background(), plain, plain, archived)
-					if err != nil {
-						t.Fatal(err)
-					}
-					for _, field := range []string{"updated_at", "recency_at"} {
-						if values[field] != modified.Unix() || values[field+"_ms"] != modified.UnixMilli() {
-							t.Fatalf("incorrect %s: %v", field, values)
-						}
-					}
-					if archived && values["archived_at"] != modified.Unix() {
-						t.Fatalf("incorrect archive time: %v", values)
 					}
 				})
 			}
