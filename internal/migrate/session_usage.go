@@ -188,6 +188,10 @@ func ClearSessions(ctx context.Context, home, sqliteHome string, selected []Sess
 			return err
 		}
 	}
+	// Paginated conversation bodies live in a separate database and cannot cascade from state_5.sqlite.
+	if err := clearSessionHistoryDatabase(ctx, staged, selectedSessionRolloutIDs(selected)); err != nil {
+		return err
+	}
 	for _, name := range []string{"history.jsonl", "session_index.jsonl"} {
 		if err := pruneSessionHistory(ctx, filepath.Join(data, name), ids); err != nil {
 			return err

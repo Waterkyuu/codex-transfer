@@ -6,20 +6,15 @@ import (
 	"strings"
 )
 
+// rolloutUUIDLength is the width of the UUID suffix identifying a canonical physical rollout.
+const rolloutUUIDLength = 36
+
 // validateSessionReferences prevents clearing rollout ranges inherited by conversations outside the selection.
 func validateSessionReferences(selected, current []SessionUsage) error {
 	selectedIDs := map[string]bool{}
-	rolloutIDs := map[string]bool{}
+	rolloutIDs := selectedSessionRolloutIDs(selected)
 	for _, session := range selected {
 		selectedIDs[session.ID] = true
-		rolloutIDs[session.ID] = true
-		for _, candidate := range session.files {
-			name := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(candidate.file), ".zst"), ".jsonl")
-			// Reverted rollouts keep the conversation ID in metadata but use a different UUID in the filename.
-			if strings.HasPrefix(name, "rollout-") && len(name) > 36 && name[len(name)-37] == '-' {
-				rolloutIDs[name[len(name)-36:]] = true
-			}
-		}
 	}
 	for _, session := range current {
 		if selectedIDs[session.ID] {
@@ -38,4 +33,21 @@ func validateSessionReferences(selected, current []SessionUsage) error {
 		}
 	}
 	return nil
+}
+
+// selectedSessionRolloutIDs includes conversation IDs and the physical histories replaced by reverts.
+func selectedSessionRolloutIDs(selected []SessionUsage) map[string]bool {
+	ids := map[string]bool{}
+	for _, session := range selected {
+		ids[session.ID] = true
+		for _, candidate := range session.files {
+			name := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(candidate.file), ".zst"), ".jsonl")
+			canonical := strings.HasPrefix(name, "rollout-") && len(name) > rolloutUUIDLength
+			// Reverted rollouts keep the conversation ID in metadata but use a different UUID in the filename.
+			if canonical && name[len(name)-rolloutUUIDLength-1] == '-' {
+				ids[name[len(name)-rolloutUUIDLength:]] = true
+			}
+		}
+	}
+	return ids
 }
