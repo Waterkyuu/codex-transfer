@@ -1,19 +1,19 @@
 {
-    "version": "0.1.1",
+    "version": "0.1.2",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/Waterkyuu/codex-transfer/releases/download/v0.1.1/codex-transfer_0.1.1_windows_amd64.zip",
+            "url": "https://github.com/Waterkyuu/codex-transfer/releases/download/v0.1.2/codex-transfer_0.1.2_windows_amd64.zip",
             "bin": [
                 "codex-transfer.exe"
             ],
-            "hash": "5cd1c7075dee9fc0309d973b112411ae8374d22b8ce4b4ef95e510e95d318af1"
+            "hash": "710da667f85966bdcaa5d70ec48b76cc0a85d379ad3d0582fcc0b60cd5a0e343"
         },
         "arm64": {
-            "url": "https://github.com/Waterkyuu/codex-transfer/releases/download/v0.1.1/codex-transfer_0.1.1_windows_arm64.zip",
+            "url": "https://github.com/Waterkyuu/codex-transfer/releases/download/v0.1.2/codex-transfer_0.1.2_windows_arm64.zip",
             "bin": [
                 "codex-transfer.exe"
             ],
-            "hash": "88068e5062c0bfec3cd21dd8346b08ec74cd48c3ce0bfe5beb16e1868f292e4a"
+            "hash": "899398cf98cf4e370a9c1d68a7fae0a8e2b1308e87fffa0ce1d5abeea12586ff"
         }
     },
     "homepage": "https://github.com/Waterkyuu/codex-transfer",
