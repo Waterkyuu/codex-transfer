@@ -1,0 +1,21 @@
+name: PR title
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+permissions: {}
+jobs:
+  title:
+    name: Conventional Commit title
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Validate title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        shell: bash
+        run: |
+          pattern='^(feat|fix|perf|refactor|docs|test|chore|style|ci)(\([a-zA-Z0-9_./-]+\))?!?: [^[:space:]].*$'
+          if [[ ! "$PR_TITLE" =~ $pattern ]]; then
+            echo '::error::Use an English Conventional Commit title, for example: feat(transfer): add destination mapping'
+            exit 1
+          fi
