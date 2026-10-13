@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 )
@@ -26,6 +28,16 @@ type Receiver struct {
 	Confirm func(context.Context, string) error
 	// Check verifies Codex is stopped before readiness and before installation.
 	Check func() error
+	// Home selects the local home prefix used when adapting structured state paths.
+	Home string
+	// ImportRoot retains complete unchanged snapshots from foreign operating systems.
+	ImportRoot string
+	// Overrides contains only explicitly supplied destination root mappings.
+	Overrides map[string]string
+	// PathMappings overrides automatic prefix translation for external project locations.
+	PathMappings map[string]string
+	// Workers selects CPU workers for decompression and independent metadata files.
+	Workers int
 	// certificate is ephemeral and never written to disk.
 	certificate tls.Certificate
 	// fingerprint is the full SHA-256 digest of the prepared certificate.
@@ -48,6 +60,19 @@ func (r *Receiver) Prepare() error {
 		roots = append(roots, Root{Name: name, Path: path})
 	}
 	if err := ValidateRoots(roots); err != nil {
+		return err
+	}
+	if r.Home == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		r.Home = home
+	}
+	if r.ImportRoot == "" {
+		r.ImportRoot = filepath.Join(r.Home, ".codex-transfer", "imports")
+	}
+	if _, err := workerCount(r.Workers); err != nil {
 		return err
 	}
 	certificate, fingerprint, err := ephemeralCertificate()
@@ -125,8 +150,11 @@ func (r *Receiver) receive(ctx context.Context, connection *tls.Conn) error {
 	if err != nil {
 		return err
 	}
-	roots, err := r.validateOffer(hello)
+	plan, err := r.validateOffer(hello)
 	if err != nil {
+		return err
+	}
+	if _, err := r.offerMapper(hello, plan); err != nil {
 		return err
 	}
 	if r.Check != nil {
@@ -134,12 +162,35 @@ func (r *Receiver) receive(ctx context.Context, connection *tls.Conn) error {
 			return err
 		}
 	}
-	installation, err := prepareInstallation(roots)
+	if plan.cross {
+		_, _ = fmt.Fprintf(
+			r.Output,
+			"Cross-system import: %s -> %s. An unchanged source snapshot will be preserved.\n",
+			hello.OS,
+			runtime.GOOS,
+		)
+		for _, name := range hello.Roots {
+			if plan.archived[name] {
+				_, _ = fmt.Fprintf(r.Output, "Preserving foreign root in source archive: %s\n", name)
+			}
+		}
+	}
+	installation, err := prepareInstallation(plan.roots)
 	if err != nil {
 		return err
 	}
 	defer installation.close()
-	archive, err := os.CreateTemp(installation.items[0].slot, "archive-*")
+	archiveDirectory := installation.items[0].slot
+	if plan.cross {
+		archiveDirectory, err = installation.resolve(sourceArchiveRoot)
+		if err != nil {
+			return err
+		}
+		if err := os.Mkdir(archiveDirectory, 0700); err != nil {
+			return err
+		}
+	}
+	archive, err := os.CreateTemp(archiveDirectory, "source-*")
 	if err != nil {
 		return err
 	}
@@ -163,7 +214,61 @@ func (r *Receiver) receive(ctx context.Context, connection *tls.Conn) error {
 	}
 	_, _ = fmt.Fprintln(r.Output, "SHA-256 verified. Extracting into private staging directories...")
 	stopKeepalive := keepAlive(connection)
-	err = extractInto(contextReader{ctx: ctx, reader: archive}, installation.resolve, hello.Size)
+	mapper, mapErr := r.offerMapper(hello, plan)
+	if mapErr != nil {
+		stopKeepalive()
+		return mapErr
+	}
+	decoded, closeDecoder, decodeErr := decodeArchive(
+		contextReader{ctx: ctx, reader: archive},
+		hello.Encoding,
+		r.Workers,
+	)
+	if decodeErr != nil {
+		stopKeepalive()
+		return decodeErr
+	}
+	rawSize := hello.RawSize
+	if rawSize == 0 {
+		rawSize = hello.Size
+	}
+	bounded := &io.LimitedReader{R: decoded, N: rawSize + 1}
+	policy := &extractPolicy{
+		archived:     plan.archived,
+		mapper:       mapper,
+		installation: installation,
+		cross:        plan.cross,
+		sourcePaths:  hello.Paths,
+	}
+	err = extractSelected(bounded, installation.resolve, rawSize, policy)
+	if err == nil {
+		_, err = io.Copy(io.Discard, bounded)
+	}
+	if err == nil && bounded.N != 1 {
+		err = errors.New("decompressed archive does not match its declared size")
+	}
+	closeDecoder()
+	if err == nil && len(mapper.mappings) > 0 {
+		err = adaptInstallation(ctx, installation, mapper, r.Workers)
+	}
+	if err == nil && plan.cross {
+		manifest, marshalErr := json.MarshalIndent(hello, "", "  ")
+		err = marshalErr
+		if err == nil {
+			// #nosec G304 -- archiveDirectory is the receiver-owned private preservation slot.
+			err = os.WriteFile(filepath.Join(archiveDirectory, "manifest.json"), manifest, 0600)
+		}
+		if err == nil {
+			err = archive.Close()
+		}
+		if err == nil {
+			name := "source.tar"
+			if hello.Encoding == "gzip" {
+				name += ".gz"
+			}
+			err = os.Rename(archive.Name(), filepath.Join(archiveDirectory, name))
+		}
+	}
 	if err == nil && r.Check != nil {
 		err = r.Check()
 	}
@@ -190,10 +295,16 @@ func (r *Receiver) receive(ctx context.Context, connection *tls.Conn) error {
 	return nil
 }
 
-// validateOffer permits only bounded same-platform archives with explicitly mapped unique roots.
-func (r *Receiver) validateOffer(hello message) ([]Root, error) {
-	if hello.Kind != "offer" || hello.OS != runtime.GOOS {
-		return nil, errors.New("invalid offer or unsupported cross-platform migration")
+// validateOffer validates platform metadata and plans active imports plus source preservation.
+func (r *Receiver) validateOffer(hello message) (*receivePlan, error) {
+	if hello.Kind != "offer" || !supportedOS(hello.OS) {
+		return nil, errors.New("invalid offer or unsupported source platform")
+	}
+	if hello.Encoding != "" && hello.Encoding != "none" && hello.Encoding != "gzip" {
+		return nil, errors.New("unsupported archive encoding")
+	}
+	if hello.RawSize < 0 || hello.RawSize > r.MaxBytes || hello.RawSize == 0 && hello.Encoding == "gzip" {
+		return nil, errors.New("invalid decompressed archive size")
 	}
 	if hello.Size <= 0 || hello.Size > r.MaxBytes {
 		return nil, errors.New("archive exceeds receiver size limit")
@@ -205,15 +316,60 @@ func (r *Receiver) validateOffer(hello message) ([]Root, error) {
 	if len(hello.Roots) == 0 || len(hello.Roots) > 64 {
 		return nil, errors.New("invalid root count")
 	}
-	roots := make([]Root, 0, len(hello.Roots))
-	for _, name := range hello.Roots {
-		path, ok := r.Targets[name]
-		if !ok {
-			return nil, fmt.Errorf("root %q has no destination; restart receiver with --map %s=/path", name, name)
-		}
-		roots = append(roots, Root{Name: name, Path: path})
+	plan, err := planDestinations(hello.OS, runtime.GOOS, hello.Roots, r.Targets, r.Overrides, r.ImportRoot)
+	if err != nil {
+		return nil, err
 	}
-	return roots, ValidateRoots(roots)
+	if plan.cross && (hello.Home == "" || len(hello.Paths) != len(hello.Roots)) {
+		return nil, errors.New("cross-system migration requires complete source path metadata")
+	}
+	for name, source := range hello.Paths {
+		known := false
+		for _, root := range hello.Roots {
+			known = known || root == name
+		}
+		if !known || sourcePath(source, hello.OS) == "" {
+			return nil, errors.New("invalid source root path metadata")
+		}
+	}
+	for key, value := range hello.StatePaths {
+		if (key != "sqlite_home" && key != "log_dir") || sourcePath(value, hello.OS) == "" {
+			return nil, errors.New("invalid source state path metadata")
+		}
+	}
+	return plan, nil
+}
+
+// offerMapper combines automatic root/home mappings with explicit receiver-side project overrides.
+func (r *Receiver) offerMapper(hello message, plan *receivePlan) (*pathMapper, error) {
+	mappings := map[string]string{}
+	if hello.Home != "" {
+		mappings[hello.Home] = r.Home
+	}
+	for _, root := range plan.roots {
+		if source := hello.Paths[root.Name]; source != "" {
+			mappings[source] = root.Path
+		}
+	}
+	for source, target := range r.PathMappings {
+		mappings[source] = target
+	}
+	mapper, err := newPathMapper(hello.OS, mappings)
+	if err != nil {
+		return nil, err
+	}
+	for key, source := range hello.StatePaths {
+		mapper.statePaths[key] = mapper.remap(source)
+	}
+	for _, root := range plan.roots {
+		switch root.Name {
+		case "sqlite":
+			mapper.statePaths["sqlite_home"] = root.Path
+		case "logs":
+			mapper.statePaths["log_dir"] = root.Path
+		}
+	}
+	return mapper, nil
 }
 
 // keepAlive prevents network inactivity timeouts while local archive extraction is running.

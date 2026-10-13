@@ -74,6 +74,9 @@ Run receive on the destination and send on the source. Either may start first.
 Quit Codex on both computers. Compare pairing codes and enter the code shown
 on the OTHER terminal at both prompts. Data starts only after both approvals
 and receiver readiness. Existing destination roots are backed up, then replaced.
+Cross-system transfers translate known paths and preserve an unchanged source
+archive. Foreign desktop settings are archived unless explicitly mapped.
+Use --workers to control parallel processing and send --compression to tune speed.
 The source is retained. Use <command> --help for options.
 `)
 }

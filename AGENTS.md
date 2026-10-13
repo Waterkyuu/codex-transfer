@@ -115,23 +115,3 @@ meaning, contract, or reason for existing instead of translating its syntax.
 - Inject external dependencies so they can be replaced with small test doubles.
 
 
-## Git commits and branches
-
-- Commit completed work proactively.
-- Use English conventional commit prefixes such as `feat`, `fix`, `docs`, `chore`, `style`, or `ci`.
-- Each commit contains one coherent responsibility and at most six files.
-- Inspect staged files before committing; exclude user changes and unrelated content.
-- Never track or commit ignored files. Never use `git add -f`, `git add --force`, or another ignore bypass unless the user explicitly names that ignored path for inclusion.
-- Commit messages use this form:
-
-```text
-feat(scope): summary
-- change one
-- change two
-- change three
-```
-
-- Create branches as `waterkyuu/<type>/<description>`, where type is `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `chore`, `style`, or `ci`.
-- When the user asks to undo or delete a commit, remove it from the branch history while preserving unrelated commits. Do not create a revert commit unless explicitly requested.
-- After removing a pushed commit, update the remote with `git push --force-with-lease`; never use unprotected `git push --force`.
-- Merge with `git merge --no-ff <branch-name> -m "Merge <current_branch> from <branch>"`.

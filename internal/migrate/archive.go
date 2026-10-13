@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -19,8 +20,12 @@ import (
 type Bundle struct {
 	// File is rewound for transmission after the snapshot has been validated.
 	File *os.File
-	// Size is the exact number of archive bytes.
+	// Size is the exact number of transmitted archive bytes.
 	Size int64
+	// RawSize bounds the uncompressed tar stream independently of network compression.
+	RawSize int64
+	// Encoding identifies the archive compression contract.
+	Encoding string
 	// SHA256 authenticates the complete archive before installation.
 	SHA256 string
 	// Skipped counts runtime sockets, which cannot be restored as persistent files.
@@ -39,6 +44,11 @@ func Snapshot(roots []Root) (*Bundle, error) {
 
 // SnapshotContext allows cancellation while scanning and copying large local data files.
 func SnapshotContext(ctx context.Context, roots []Root) (*Bundle, error) {
+	return snapshot(ctx, roots, 0, "none")
+}
+
+// snapshot overlaps tar construction, parallel compression, disk output, and digest calculation.
+func snapshot(ctx context.Context, roots []Root, workers int, compression string) (*Bundle, error) {
 	if len(roots) == 0 {
 		return nil, errors.New("no source data found")
 	}
@@ -49,7 +59,7 @@ func SnapshotContext(ctx context.Context, roots []Root) (*Bundle, error) {
 	if err != nil {
 		return nil, err
 	}
-	bundle := &Bundle{File: file}
+	bundle := &Bundle{File: file, Encoding: "none"}
 	success := false
 	defer func() {
 		if !success {
@@ -57,7 +67,19 @@ func SnapshotContext(ctx context.Context, roots []Root) (*Bundle, error) {
 		}
 	}()
 	hash := sha256.New()
-	writer := tar.NewWriter(io.MultiWriter(file, hash))
+	output := io.MultiWriter(file, hash)
+	var codec *compressionWriter
+	if compression != "none" {
+		codec, err = newCompressionWriter(ctx, output, workers, compression)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = codec.Close() }()
+		output = codec
+		bundle.Encoding = "gzip"
+	}
+	counter := &countWriter{writer: output}
+	writer := tar.NewWriter(counter)
 	before := map[string]fs.FileInfo{}
 	for _, root := range roots {
 		err := filepath.WalkDir(root.Path, func(local string, entry fs.DirEntry, walkErr error) error {
@@ -129,6 +151,12 @@ func SnapshotContext(ctx context.Context, roots []Root) (*Bundle, error) {
 	if err := writer.Close(); err != nil {
 		return nil, err
 	}
+	if codec != nil {
+		if err := codec.Close(); err != nil {
+			return nil, err
+		}
+	}
+	bundle.RawSize = counter.total
 	after := map[string]fs.FileInfo{}
 	for _, root := range roots {
 		if err := filepath.WalkDir(root.Path, func(local string, entry fs.DirEntry, walkErr error) error {
@@ -169,6 +197,21 @@ func SnapshotContext(ctx context.Context, roots []Root) (*Bundle, error) {
 	return bundle, nil
 }
 
+// countWriter measures raw tar bytes without storing an extra uncompressed snapshot.
+type countWriter struct {
+	// writer receives the streamed archive or compression input.
+	writer io.Writer
+	// total is the exact successfully written uncompressed byte count.
+	total int64
+}
+
+// Write counts accepted bytes while preserving the underlying writer's failures.
+func (w *countWriter) Write(data []byte) (int, error) {
+	n, err := w.writer.Write(data)
+	w.total += int64(n)
+	return n, err
+}
+
 // contextReader checks cancellation between bounded file read operations.
 type contextReader struct {
 	// ctx belongs to the enclosing snapshot or extraction operation.
@@ -200,15 +243,30 @@ type pendingLink struct {
 	path string
 	// target is preserved literally and is never traversed by the extractor.
 	target string
+	// root identifies the source root for relative symlink translation.
+	root string
+	// relative locates this link inside that source root.
+	relative string
 }
 
 // extractInto confines each archive root to a receiver-owned staging location.
 func extractInto(reader io.Reader, resolve func(string) (string, error), maxBytes int64) error {
+	return extractSelected(reader, resolve, maxBytes, nil)
+}
+
+// extractSelected restores portable roots and validates preserved roots without activating their contents.
+func extractSelected(
+	reader io.Reader,
+	resolve func(string) (string, error),
+	maxBytes int64,
+	policy *extractPolicy,
+) error {
 	if maxBytes <= 0 {
 		return errors.New("archive byte limit must be positive")
 	}
 	archive := tar.NewReader(reader)
 	seen := map[string]byte{}
+	caseNames := map[string]bool{}
 	links := []pendingLink{}
 	var extracted int64
 	for {
@@ -220,19 +278,41 @@ func extractInto(reader io.Reader, resolve func(string) (string, error), maxByte
 			return fmt.Errorf("read archive: %w", err)
 		}
 		name := strings.TrimSuffix(header.Name, "/")
-		unsafe := path.Clean(name) != name || strings.ContainsAny(name, "\\:\x00")
-		if unsafe || !filepath.IsLocal(filepath.FromSlash(name)) {
+		root, rel, _ := strings.Cut(name, "/")
+		archived := policy != nil && policy.archived[root]
+		unsafe := path.Clean(name) != name || path.IsAbs(name) || strings.ContainsRune(name, 0)
+		if !archived {
+			unsafe = unsafe || strings.ContainsAny(name, "\\:") || !filepath.IsLocal(filepath.FromSlash(name))
+		}
+		if unsafe {
 			return fmt.Errorf("unsafe archive path %q", name)
 		}
 		if _, exists := seen[name]; exists {
 			return fmt.Errorf("duplicate archive path %q", name)
 		}
-		root, rel, _ := strings.Cut(name, "/")
 		if !validName(root) {
 			return fmt.Errorf("invalid archive root %q", root)
 		}
 		if rel == "" && header.Typeflag == tar.TypeSymlink {
 			return fmt.Errorf("symbolic archive root %q", root)
+		}
+		if header.Size < 0 || header.Size > maxBytes-extracted {
+			return errors.New("archive exceeds extraction limit")
+		}
+		extracted += header.Size
+		if archived {
+			seen[name] = header.Typeflag
+			continue
+		}
+		if runtime.GOOS == "windows" {
+			if err := windowsArchiveName(name); err != nil {
+				return err
+			}
+			canonical := strings.ToLower(name)
+			if caseNames[canonical] {
+				return fmt.Errorf("archive names collide on Windows: %q", name)
+			}
+			caseNames[canonical] = true
 		}
 		base, err := resolve(root)
 		if err != nil {
@@ -245,10 +325,6 @@ func extractInto(reader io.Reader, resolve func(string) (string, error), maxByte
 			}
 		}
 		seen[name] = header.Typeflag
-		if header.Size < 0 || header.Size > maxBytes-extracted {
-			return errors.New("archive exceeds extraction limit")
-		}
-		extracted += header.Size
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := os.Mkdir(local, 0700); err != nil {
@@ -271,7 +347,7 @@ func extractInto(reader io.Reader, resolve func(string) (string, error), maxByte
 			if strings.ContainsRune(header.Linkname, 0) {
 				return errors.New("invalid symlink target")
 			}
-			links = append(links, pendingLink{path: local, target: header.Linkname})
+			links = append(links, pendingLink{path: local, target: header.Linkname, root: root, relative: rel})
 		default:
 			return fmt.Errorf("unsupported archive entry type %d", header.Typeflag)
 		}
@@ -280,7 +356,20 @@ func extractInto(reader io.Reader, resolve func(string) (string, error), maxByte
 		return errors.New("empty archive")
 	}
 	for _, link := range links {
-		if err := os.Symlink(link.target, link.path); err != nil {
+		if policy != nil && policy.cross && runtime.GOOS == "windows" {
+			if err := policy.materializeLink(link, links, map[string]bool{}); err != nil {
+				return err
+			}
+			continue
+		}
+		target := link.target
+		if policy != nil && policy.mapper != nil {
+			target = policy.mapper.remap(target)
+			if target == link.target && policy.mapper.sourceOS == "windows" && policy.cross {
+				target = filepath.FromSlash(strings.ReplaceAll(target, `\`, "/"))
+			}
+		}
+		if err := os.Symlink(target, link.path); err != nil {
 			return err
 		}
 	}

@@ -69,8 +69,14 @@ func (a *application) migration(ctx context.Context, command string, args []stri
 	a.printRoots(roots)
 	if command == "send" {
 		sender := &migrate.Sender{
-			Roots: roots, Output: a.output, Fingerprint: options.fingerprint,
-			Confirm: a.confirm, Check: guard, Wait: options.wait,
+			Roots:       roots,
+			Output:      a.output,
+			Fingerprint: options.fingerprint,
+			Confirm:     a.confirm,
+			Check:       guard,
+			Wait:        options.wait,
+			Workers:     options.workers,
+			Compression: options.compression,
 		}
 		return sender.Send(ctx, address)
 	}
@@ -78,9 +84,23 @@ func (a *application) migration(ctx context.Context, command string, args []stri
 	for _, root := range roots {
 		targets[root.Name] = root.Path
 	}
+	overrides := map[string]string{}
+	for _, mapping := range options.mappings {
+		name, target, _ := strings.Cut(mapping, "=")
+		overrides[name] = target
+	}
+	pathMappings := map[string]string{}
+	for _, mapping := range options.pathMappings {
+		source, target, _ := strings.Cut(mapping, "=")
+		if _, exists := pathMappings[source]; exists {
+			return fmt.Errorf("duplicate source path mapping %q", source)
+		}
+		pathMappings[source] = target
+	}
 	receiver := &migrate.Receiver{
 		Targets: targets, Output: a.output, MaxBytes: options.maxGiB * (1 << 30),
-		Confirm: a.confirm, Check: guard,
+		Confirm: a.confirm, Check: guard, Overrides: overrides, PathMappings: pathMappings,
+		ImportRoot: options.importRoot, Workers: options.workers,
 	}
 	if err := receiver.Prepare(); err != nil {
 		return err
