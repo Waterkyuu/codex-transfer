@@ -165,15 +165,21 @@ configuration, databases, workspaces, and other roots are excluded; `--extra` ca
 session selection. Database-only source metadata, such as custom titles and pinning, is not imported.
 Database-backed paginated histories require full migration and are rejected by session selection.
 Invalid metadata or an empty selection stops the sender before connecting.
+The source's current rollout pointers are read from the resolved SQLite home. When a session has multiple
+rollouts and its current file cannot be determined, selection stops instead of guessing from filenames.
 
 Receiving conversations and settings are retained. Duplicate **session IDs** keep the receiving version,
 even if filenames or archived status differ. A path collision between different IDs aborts the merge
 without changing live data. The merge uses private staging and backs up the receiving Codex root and any
-separate SQLite root before installation. Allow disk space for their snapshots, staged copies, and backups.
-For SQLite stores with a completed discovery marker, only that marker is reset so Codex can index imported
-rollouts on its next startup; existing thread rows remain. Restart Codex after completion and allow indexing
-to finish. See the upstream [rollout discovery implementation](https://github.com/openai/codex/blob/main/codex-rs/rollout/src/metadata.rs)
-and [discovery state handling](https://github.com/openai/codex/blob/main/codex-rs/state/src/runtime/backfill.rs).
+separate SQLite root before installation. Allow disk space for the received archive, local staging copies, and backups.
+Database discovery is restricted to the resolved SQLite home and the highest numbered state database there;
+worktree fixtures, backup subdirectories, and older state versions are excluded. New sessions are registered
+with insert-only statements in the staged database; existing thread rows and discovery markers remain unchanged.
+If the receiving database has an unknown required thread column or unfinished discovery, the merge stops before
+installation. Complete initialization in Codex before retrying, or use full migration for an unsupported schema.
+If no receiving state database exists, Codex initializes its index on startup. Restart Codex after completion.
+Symbolic SQLite directories in staged receiving data are rejected; use `receive --sqlite-home /real/path`
+to include the actual SQLite directory as a separate root.
 
 ### Use a different port or wait longer
 
