@@ -108,7 +108,8 @@ func snapshotFiles(
 					return nil
 				}
 			}
-			info, err := entry.Info()
+			// Match session selection's Lstat snapshots instead of cached Windows enumeration metadata.
+			info, err := os.Lstat(local)
 			if err != nil {
 				return err
 			}
@@ -201,7 +202,7 @@ func snapshotFiles(
 					return nil
 				}
 			}
-			info, err := entry.Info()
+			info, err := os.Lstat(local)
 			if err != nil {
 				return err
 			}

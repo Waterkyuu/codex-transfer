@@ -189,6 +189,8 @@ func startCaptured(command *exec.Cmd) (<-chan string, <-chan string, error) {
 		if err := scanner.Err(); err != nil {
 			output.WriteString(err.Error())
 		}
+		// Preserve complete failure diagnostics when startup ends before an expected event.
+		lines <- output.String()
 		complete <- output.String()
 	}()
 	return lines, complete, nil
@@ -197,11 +199,13 @@ func startCaptured(command *exec.Cmd) (<-chan string, <-chan string, error) {
 // waitForLine observes process ordering through explicit output events rather than sleeps.
 func waitForLine(t *testing.T, lines <-chan string, prefix string) string {
 	t.Helper()
+	var observed strings.Builder
 	for line := range lines {
 		if strings.HasPrefix(line, prefix) {
 			return line
 		}
+		observed.WriteString(line + "\n")
 	}
-	t.Fatalf("process exited before %q", prefix)
+	t.Fatalf("process exited before %q:\n%s", prefix, observed.String())
 	return ""
 }
