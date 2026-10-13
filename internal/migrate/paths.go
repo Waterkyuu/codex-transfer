@@ -117,6 +117,8 @@ type receivePlan struct {
 	roots []Root
 	// archived identifies source roots whose platform-specific contents must not replace active state.
 	archived map[string]bool
+	// sqliteHome selects the resolved local database directory for this transfer only.
+	sqliteHome string
 	// cross records whether platform adaptation is required.
 	cross bool
 }

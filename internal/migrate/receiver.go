@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 )
 
@@ -40,8 +40,6 @@ type Receiver struct {
 	PathMappings map[string]string
 	// Workers selects CPU workers for decompression and independent metadata files.
 	Workers int
-	// sqliteHome retains the resolved local database directory for the validated session offer.
-	sqliteHome string
 	// certificate is ephemeral and never written to disk.
 	certificate tls.Certificate
 	// fingerprint is the full SHA-256 digest of the prepared certificate.
@@ -186,7 +184,7 @@ func (r *Receiver) receive(ctx context.Context, connection *tls.Conn) error {
 		return err
 	}
 	defer installation.close()
-	installation.sqliteHome = r.sqliteHome
+	installation.sqliteHome = plan.sqliteHome
 	archiveDirectory := installation.items[0].slot
 	if plan.cross {
 		archiveDirectory, err = installation.resolve(sourceArchiveRoot)
@@ -202,39 +200,12 @@ func (r *Receiver) receive(ctx context.Context, connection *tls.Conn) error {
 		return err
 	}
 	defer func() { _ = archive.Close() }()
-	if err := writeMessage(connection, message{Kind: "ready", Version: hello.Version, Mode: hello.Mode}); err != nil {
+	if err := r.receiveArchive(connection, archive, hello); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintln(r.Output, "Both terminals are ready. Receiving encrypted data...")
-	p := newProgress(r.Output, hello.Size)
-	hash := sha256.New()
-	_, err = io.CopyN(io.MultiWriter(archive, hash, p), networkReader{connection: connection}, hello.Size)
-	p.stop()
-	if err != nil {
-		return fmt.Errorf("receive archive: %w", err)
-	}
-	if hex.EncodeToString(hash.Sum(nil)) != hello.SHA256 {
-		return errors.New("archive SHA-256 mismatch; destination untouched")
-	}
-	if _, err := archive.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-	_, _ = fmt.Fprintln(r.Output, "SHA-256 verified. Extracting into private staging directories...")
-	stopKeepalive := keepAlive(connection)
-	decoded, closeDecoder, decodeErr := decodeArchive(
-		contextReader{ctx: ctx, reader: archive},
-		hello.Encoding,
-		r.Workers,
-	)
-	if decodeErr != nil {
-		stopKeepalive()
-		return decodeErr
-	}
-	rawSize := hello.RawSize
-	if rawSize == 0 {
-		rawSize = hello.Size
-	}
-	bounded := &io.LimitedReader{R: decoded, N: rawSize + 1}
+	// Deferred shutdown covers every failure; the explicit stop keeps working messages before the acknowledgement.
+	stopKeepalive := sync.OnceFunc(keepAlive(connection))
+	defer stopKeepalive()
 	policy := &extractPolicy{
 		archived:     plan.archived,
 		mapper:       mapper,
@@ -242,55 +213,41 @@ func (r *Receiver) receive(ctx context.Context, connection *tls.Conn) error {
 		cross:        plan.cross,
 		sourcePaths:  hello.Paths,
 	}
-	err = extractSelected(bounded, installation.resolve, rawSize, policy)
-	if err == nil {
-		_, err = io.Copy(io.Discard, bounded)
+	if err := r.extractArchive(ctx, archive, hello, policy); err != nil {
+		return err
 	}
-	if err == nil && bounded.N != 1 {
-		err = errors.New("decompressed archive does not match its declared size")
-	}
-	closeDecoder()
-	if err == nil && len(mapper.mappings) > 0 {
+	if len(mapper.mappings) > 0 {
 		if hello.Mode == "sessions" {
 			err = adaptSessionInstallation(ctx, installation, mapper, r.Workers)
 		} else {
 			err = adaptInstallation(ctx, installation, mapper, r.Workers)
 		}
-	}
-	if err == nil && hello.Mode == "sessions" {
-		err = mergeSessionInstallation(ctx, installation, r.Output)
-	}
-	if err == nil && plan.cross {
-		manifest, marshalErr := json.MarshalIndent(hello, "", "  ")
-		err = marshalErr
-		if err == nil {
-			// #nosec G304 -- archiveDirectory is the receiver-owned private preservation slot.
-			err = os.WriteFile(filepath.Join(archiveDirectory, "manifest.json"), manifest, 0600)
-		}
-		if err == nil {
-			err = archive.Close()
-		}
-		if err == nil {
-			name := "source.tar"
-			if hello.Encoding == "gzip" {
-				name += ".gz"
-			}
-			err = os.Rename(archive.Name(), filepath.Join(archiveDirectory, name))
+		if err != nil {
+			return err
 		}
 	}
-	if err == nil && r.Check != nil {
-		err = r.Check()
+	if hello.Mode == "sessions" {
+		if err := mergeSessionInstallation(ctx, installation, r.Output); err != nil {
+			return err
+		}
 	}
-	if err == nil {
-		err = ctx.Err()
+	if plan.cross {
+		if err := preserveSourceArchive(archive, hello); err != nil {
+			return err
+		}
 	}
-	if err == nil {
-		err = installation.commit()
+	if r.Check != nil {
+		if err := r.Check(); err != nil {
+			return err
+		}
 	}
-	stopKeepalive()
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if err := installation.commit(); err != nil {
+		return err
+	}
+	stopKeepalive()
 	for _, item := range installation.items {
 		_, _ = fmt.Fprintf(r.Output, "Installed %s: %s\n", item.name, item.target)
 		if item.backup != "" {
@@ -368,7 +325,7 @@ func (r *Receiver) validateOffer(hello message) (*receivePlan, error) {
 		if err := ValidateRoots(plan.roots); err != nil {
 			return nil, err
 		}
-		r.sqliteHome = target
+		plan.sqliteHome = target
 	}
 	if plan.cross && (hello.Home == "" || len(hello.Paths) != len(hello.Roots)) {
 		return nil, errors.New("cross-system migration requires complete source path metadata")

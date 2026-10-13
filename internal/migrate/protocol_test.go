@@ -299,3 +299,36 @@ func TestTLSMinimum(t *testing.T) {
 		t.Fatal("TLS 1.2 accepted")
 	}
 }
+
+// TestSessionOfferPlanOwnership keeps resolved SQLite paths isolated to each validated transfer plan.
+func TestSessionOfferPlanOwnership(t *testing.T) {
+	home, sqlite := t.TempDir(), t.TempDir()
+	receiver := &Receiver{
+		Targets: map[string]string{"codex": home}, SQLiteHome: sqlite, MaxBytes: 1024,
+	}
+	hash := sha256.Sum256([]byte("fixture"))
+	offer := message{
+		Kind: "offer", OS: runtime.GOOS, Roots: []string{"codex"},
+		Mode: "sessions", Version: sessionProtocolVersion, Size: 512, SHA256: hex.EncodeToString(hash[:]),
+	}
+	plan, err := receiver.validateOffer(offer)
+	if err != nil || plan.sqliteHome != sqlite {
+		t.Fatalf("session plan did not retain its SQLite destination: %+v, %v", plan, err)
+	}
+	// This metadata is rejected after resolving SQLite, so planning must not publish partial state.
+	offer.StatePaths = map[string]string{"unknown": sqlite}
+	if failed, err := receiver.validateOffer(offer); err == nil || failed != nil {
+		t.Fatalf("invalid offer returned a usable plan: %+v, %v", failed, err)
+	}
+	if receiver.SQLiteHome != sqlite || receiver.Targets["codex"] != home || len(receiver.Targets) != 1 {
+		t.Fatal("offer validation changed receiver configuration")
+	}
+	offer.Mode, offer.Version, offer.StatePaths = "", protocolVersion, nil
+	full, err := receiver.validateOffer(offer)
+	if err != nil || full.sqliteHome != "" {
+		t.Fatalf("full transfer inherited the previous session destination: %+v, %v", full, err)
+	}
+	if plan.sqliteHome != sqlite {
+		t.Fatal("subsequent planning changed an earlier session plan")
+	}
+}
