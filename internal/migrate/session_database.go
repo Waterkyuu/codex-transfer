@@ -102,12 +102,62 @@ func sessionSQLiteHome(codexHome, override string) (string, error) {
 	return filepath.Abs(codexHome)
 }
 
+// stagedSessionStateDatabase rejects cloned aliases before resolving a writable private state database.
+func stagedSessionStateDatabase(base, relative string) (string, error) {
+	if relative != "." && !filepath.IsLocal(relative) {
+		return "", errors.New("staged SQLite home must be inside its private data root")
+	}
+	directory := base
+	ancestors := []string{base}
+	for _, component := range strings.Split(relative, string(filepath.Separator)) {
+		if component == "." || component == "" {
+			continue
+		}
+		directory = filepath.Join(directory, component)
+		ancestors = append(ancestors, directory)
+	}
+	// A cloned directory link can still point at the live database; never open SQLite through staged aliases.
+	for _, ancestor := range ancestors {
+		info, err := os.Lstat(ancestor)
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", errors.New("symbolic SQLite directory in staging; select its real path with --sqlite-home")
+		}
+		if !info.IsDir() {
+			return "", fmt.Errorf("staged SQLite home is not a directory: %s", ancestor)
+		}
+	}
+	file, err := sessionStateDatabase(directory)
+	if err != nil || file == "" {
+		return file, err
+	}
+	// SQLite may write journals and WAL sidecars while opening a database; those paths must also stay private.
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		info, err := os.Lstat(file + suffix)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("staged SQLite sidecar is not a regular file: %s", file+suffix)
+		}
+	}
+	return file, nil
+}
+
 // stagedSessionDatabases resolves only the receiving SQLite home, excluding project files and older state versions.
 func stagedSessionDatabases(staged *installation) ([]string, error) {
 	var codex *installItem
 	for _, item := range staged.items {
 		if item.name == "sqlite" {
-			file, err := sessionStateDatabase(filepath.Join(item.slot, "data"))
+			file, err := stagedSessionStateDatabase(filepath.Join(item.slot, "data"), ".")
 			if err != nil {
 				return nil, err
 			}
@@ -128,7 +178,7 @@ func stagedSessionDatabases(staged *installation) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	directory := data
+	relative := "."
 	if configuredHome := configured["sqlite_home"]; configuredHome != "" {
 		absolute, err := filepath.Abs(configuredHome)
 		if err != nil {
@@ -142,13 +192,12 @@ func stagedSessionDatabases(staged *installation) ([]string, error) {
 			}
 			return nil, errors.New("receiving SQLite home must be included in the staged roots")
 		}
-		relative, err := filepath.Rel(codex.target, absolute)
+		relative, err = filepath.Rel(codex.target, absolute)
 		if err != nil {
 			return nil, err
 		}
-		directory = filepath.Join(data, relative)
 	}
-	file, err := sessionStateDatabase(directory)
+	file, err := stagedSessionStateDatabase(data, relative)
 	if err != nil {
 		return nil, err
 	}
