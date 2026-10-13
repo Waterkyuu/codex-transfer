@@ -203,8 +203,8 @@ func readSessionMetadata(ctx context.Context, file string) (sessionMetadata, err
 	return record.Payload, nil
 }
 
-// walkSessionFiles scans only active and archived rollout trees and never follows symbolic links.
-func walkSessionFiles(ctx context.Context, home string, visit func(string, fs.FileInfo) error) error {
+// walkSessionFiles scans rollout trees without following links; receiving scans may preserve unrelated links.
+func walkSessionFiles(ctx context.Context, home string, receiving bool, visit func(string, fs.FileInfo) error) error {
 	for _, directory := range []string{"sessions", "archived_sessions"} {
 		base := filepath.Join(home, directory)
 		if _, err := os.Lstat(base); errors.Is(err, os.ErrNotExist) {
@@ -216,10 +216,14 @@ func walkSessionFiles(ctx context.Context, home string, visit func(string, fs.Fi
 			if err := errors.Join(ctx.Err(), walkErr); err != nil {
 				return err
 			}
+			rollout := strings.HasSuffix(file, ".jsonl") || strings.HasSuffix(file, ".jsonl.zst")
 			if entry.Type()&os.ModeSymlink != 0 {
+				// Local non-rollout links survive cloning; skipping them cannot read their targets.
+				if receiving && file != base && !rollout {
+					return nil
+				}
 				return fmt.Errorf("symbolic session path is not supported: %s", file)
 			}
-			rollout := strings.HasSuffix(file, ".jsonl") || strings.HasSuffix(file, ".jsonl.zst")
 			if entry.IsDir() || !rollout {
 				return nil
 			}
@@ -263,7 +267,7 @@ func (f *SessionFilter) selectFiles(
 	selected := map[string]fs.FileInfo{}
 	groups := map[string][]sessionCandidate{}
 	ids := []string{}
-	err = walkSessionFiles(ctx, home, func(file string, info fs.FileInfo) error {
+	err = walkSessionFiles(ctx, home, false, func(file string, info fs.FileInfo) error {
 		meta, err := readSessionMetadata(ctx, file)
 		if err != nil {
 			return fmt.Errorf("read session %s: %w", file, err)

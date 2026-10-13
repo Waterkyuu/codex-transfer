@@ -72,6 +72,15 @@ func TestCLIFilteredSessions(t *testing.T) {
 		); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.MkdirAll(filepath.Join(destination, ".codex", "sessions"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(
+			"missing-local-note",
+			filepath.Join(destination, ".codex", "sessions", "notes"),
+		); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for range 2 {
 		log := runFilteredTransfer(t, binary, source, destination, "", "")
@@ -108,6 +117,12 @@ func TestCLIFilteredSessions(t *testing.T) {
 		data, err := os.ReadFile(filepath.Join(destination, ".codex", "local:note"))
 		if err != nil || string(data) != "local note" {
 			t.Fatalf("native receiving filename changed: %s, %v", data, err)
+		}
+		if target, err := os.Readlink(
+			filepath.Join(destination, ".codex", "sessions", "notes"),
+		); err != nil ||
+			target != "missing-local-note" {
+			t.Fatalf("local link changed: %s, %v", target, err)
 		}
 	}
 	db, err := sql.Open("sqlite3", filepath.Join(destination, ".codex", "state_5.sqlite"))

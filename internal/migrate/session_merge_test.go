@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -151,5 +152,88 @@ func TestSessionMergeRejectsUnexpectedFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(destination, "auth.json")); !os.IsNotExist(err) {
 		t.Fatal("destination changed on rejected merge")
+	}
+}
+
+// TestSessionMergePreservesUnrelatedLinks keeps local links without treating their targets as conversations.
+func TestSessionMergePreservesUnrelatedLinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("this fixture requires unprivileged symbolic link creation")
+	}
+	for _, name := range []string{"notes", "directory", "dangling", "nested", "linked.jsonl", "linked.jsonl.zst", "sessions"} {
+		t.Run(name, func(t *testing.T) {
+			destination, external := t.TempDir(), t.TempDir()
+			outside := writeSessionFixture(t, external, "outside.jsonl", "new", "2026-10-01T00:00:00Z", "/external")
+			original, err := os.ReadFile(outside)
+			if err != nil {
+				t.Fatal(err)
+			}
+			link := filepath.Join(destination, "sessions", name)
+			target := outside
+			switch name {
+			case "directory", "nested":
+				target = external
+			case "dangling":
+				target = filepath.Join(external, "missing")
+			case "sessions":
+				link, target = filepath.Join(destination, "sessions"), external
+			}
+			if err := os.MkdirAll(filepath.Dir(link), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+			plan, err := prepareInstallation([]Root{{Name: "codex", Path: destination}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer plan.close()
+			staged, err := plan.resolve("codex")
+			if err != nil {
+				t.Fatal(err)
+			}
+			relative := "sessions/new.jsonl"
+			if name == "nested" {
+				relative = "sessions/nested/new.jsonl"
+			}
+			writeSessionFixture(t, staged, relative, "new", "2026-10-01T00:00:00Z", "/dev/app")
+			err = mergeSessionInstallation(context.Background(), plan, io.Discard)
+			switch name {
+			case "nested":
+				if err == nil || !strings.Contains(err.Error(), "session parent is not a directory") {
+					t.Fatalf("linked destination ancestor accepted: %v", err)
+				}
+			case "linked.jsonl", "linked.jsonl.zst", "sessions":
+				if err == nil || !strings.Contains(err.Error(), "symbolic session path") {
+					t.Fatalf("session link accepted: %v", err)
+				}
+			default:
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := plan.commit(); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := os.Stat(filepath.Join(destination, "sessions", "new.jsonl")); err != nil {
+					t.Fatalf("link target suppressed incoming session: %v", err)
+				}
+			}
+			filter, _ := NewSessionFilter("2026-10-01", "", nil, nil)
+			if _, _, err := filter.selectFiles(
+				context.Background(),
+				destination,
+				"",
+			); err == nil ||
+				!strings.Contains(err.Error(), "symbolic session path") {
+				t.Fatalf("source session link accepted: %v", err)
+			}
+			if got, err := os.Readlink(link); err != nil || got != target {
+				t.Fatalf("receiving link changed: %s, %v", got, err)
+			}
+			if got, err := os.ReadFile(outside); err != nil || string(got) != string(original) {
+				t.Fatalf("external session changed: %s, %v", got, err)
+			}
+		})
 	}
 }

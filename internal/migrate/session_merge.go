@@ -178,7 +178,7 @@ func mergeSessionInstallation(ctx context.Context, installation *installation, o
 		}
 	}
 	existing := map[string]bool{}
-	if err := walkSessionFiles(ctx, staged, func(file string, _ fs.FileInfo) error {
+	if err := walkSessionFiles(ctx, staged, true, func(file string, _ fs.FileInfo) error {
 		meta, err := readSessionMetadata(ctx, file)
 		if err != nil {
 			return fmt.Errorf("read receiving session %s: %w", file, err)
