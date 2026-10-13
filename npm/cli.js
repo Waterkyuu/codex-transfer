@@ -11,8 +11,23 @@ if (!fs.existsSync(executable)) {
   process.exit(1);
 }
 const child = spawn(executable, process.argv.slice(2), { stdio: 'inherit', windowsHide: false });
-child.on('error', (error) => { console.error(`Unable to start codex-transfer: ${error.message}`); process.exitCode = 1; });
+// PID-directed shutdown must reach the native process before the wrapper exits.
+// Windows retains Node's existing launcher behavior because POSIX signals differ there.
+const signals = process.platform === 'win32' ? [] : ['SIGINT', 'SIGTERM'];
+const handlers = new Map(signals.map((signal) => [signal, () => child.kill(signal)]));
+for (const [signal, handler] of handlers) process.on(signal, handler);
+
+// Release signal ownership before mirroring a child signal to avoid recursion.
+function removeSignalHandlers() {
+  for (const [signal, handler] of handlers) process.removeListener(signal, handler);
+}
+child.on('error', (error) => {
+  removeSignalHandlers();
+  console.error(`Unable to start codex-transfer: ${error.message}`);
+  process.exitCode = 1;
+});
 child.on('exit', (code, signal) => {
+  removeSignalHandlers();
   if (signal) { process.kill(process.pid, signal); return; }
   process.exitCode = code ?? 1;
 });
