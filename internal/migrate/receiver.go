@@ -154,7 +154,9 @@ func (r *Receiver) receive(ctx context.Context, connection *tls.Conn) error {
 	if err != nil {
 		return err
 	}
-	if _, err := r.offerMapper(hello, plan); err != nil {
+	// Keep the validated mapping for extraction and adaptation instead of rebuilding it after transfer.
+	mapper, err := r.offerMapper(hello, plan)
+	if err != nil {
 		return err
 	}
 	if r.Check != nil {
@@ -214,11 +216,6 @@ func (r *Receiver) receive(ctx context.Context, connection *tls.Conn) error {
 	}
 	_, _ = fmt.Fprintln(r.Output, "SHA-256 verified. Extracting into private staging directories...")
 	stopKeepalive := keepAlive(connection)
-	mapper, mapErr := r.offerMapper(hello, plan)
-	if mapErr != nil {
-		stopKeepalive()
-		return mapErr
-	}
 	decoded, closeDecoder, decodeErr := decodeArchive(
 		contextReader{ctx: ctx, reader: archive},
 		hello.Encoding,
