@@ -230,11 +230,16 @@ func mergeSessionInstallation(ctx context.Context, installation *installation, o
 			registrations = append(registrations, primary[id])
 		}
 		for _, database := range databases {
-			err := registerSessionIndex(ctx, database, registrations, func(file sessionFile) (map[string]any, error) {
-				archived := strings.HasPrefix(filepath.ToSlash(file.relative), "archived_sessions/")
-				return readSessionIndex(ctx, filepath.Join(staged, file.relative),
-					filepath.Join(target, file.relative), archived)
-			})
+			err := registerSessionIndex(
+				ctx,
+				database,
+				registrations,
+				func(file sessionFile) (*sessionIndexRecord, error) {
+					archived := strings.HasPrefix(filepath.ToSlash(file.relative), "archived_sessions/")
+					return readSessionIndex(ctx, filepath.Join(staged, file.relative),
+						filepath.Join(target, file.relative), archived)
+				},
+			)
 			if err != nil {
 				return fmt.Errorf("register receiving sessions: %w", err)
 			}
