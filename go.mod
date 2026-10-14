@@ -1,14 +1,14 @@
 module github.com/waterkyuu/codex-transfer
 
-go 1.22.0
+go 1.26.0
 
 require (
-	github.com/klauspost/compress v1.18.0
-	github.com/ncruces/go-sqlite3 v0.22.0
+	github.com/klauspost/compress v1.20.1
+	github.com/ncruces/go-sqlite3 v0.35.6
 )
 
 require (
+	github.com/ncruces/go-sqlite3-wasm/v6 v6.3.35304 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
-	github.com/tetratelabs/wazero v1.9.0 // indirect
-	golang.org/x/sys v0.29.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 )
