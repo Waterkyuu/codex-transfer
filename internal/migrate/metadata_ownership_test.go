@@ -3,6 +3,7 @@ package migrate
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,9 +93,17 @@ func TestMetadataOwnership(t *testing.T) {
 				t.Fatal(err)
 			}
 			for name := range metadata {
+				want := filepath.ToSlash(filepath.Join(destination, "project"))
+				if name != "config.toml" {
+					// JSON retains native Windows separators and escapes them; compare its encoded path value.
+					encoded, err := json.Marshal(filepath.Join(destination, "project"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					want = string(encoded)
+				}
 				data, err := os.ReadFile(filepath.Join(stage, filepath.FromSlash(name)))
-				if err != nil ||
-					!strings.Contains(string(data), filepath.ToSlash(filepath.Join(destination, "project"))) {
+				if err != nil || !strings.Contains(string(data), want) {
 					t.Fatalf("owned metadata %s not translated: %s, %v", name, data, err)
 				}
 			}
