@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/klauspost/compress/zstd"
@@ -27,44 +28,79 @@ func pathField(key string) bool {
 	}
 }
 
-// translateValue updates only recognized metadata fields and workspace-label keys recursively.
-func translateValue(value any, mapper *pathMapper, paths bool) (any, bool) {
+// translateValue updates recognized metadata paths and rejects lossy workspace-label mappings.
+func translateValue(value any, mapper *pathMapper, paths bool) (any, bool, error) {
 	changed := false
 	switch current := value.(type) {
 	case string:
 		if paths {
 			mapped := mapper.remap(current)
-			return mapped, mapped != current
+			return mapped, mapped != current, nil
 		}
 	case []any:
 		for index, item := range current {
-			mapped, different := translateValue(item, mapper, paths)
+			mapped, different, err := translateValue(item, mapper, paths)
+			if err != nil {
+				return nil, false, err
+			}
 			current[index] = mapped
 			changed = changed || different
 		}
 	case map[string]any:
-		for key, item := range current {
+		keys := make([]string, 0, len(current))
+		for key := range current {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			item := current[key]
 			if key == "workspace-root-labels" {
 				if labels, ok := item.(map[string]any); ok {
-					updated := make(map[string]any, len(labels))
-					for root, label := range labels {
-						mapped := mapper.remap(root)
-						if _, duplicate := updated[mapped]; duplicate {
-							return value, false
-						}
-						updated[mapped] = label
-						changed = changed || mapped != root
+					updated, different, err := translateWorkspaceLabels(labels, mapper)
+					if err != nil {
+						return nil, false, err
 					}
 					current[key] = updated
+					changed = changed || different
 					continue
 				}
 			}
-			mapped, different := translateValue(item, mapper, pathField(key))
+			mapped, different, err := translateValue(item, mapper, pathField(key))
+			if err != nil {
+				return nil, false, err
+			}
 			current[key] = mapped
 			changed = changed || different
 		}
 	}
-	return value, changed
+	return value, changed, nil
+}
+
+// translateWorkspaceLabels retains every label or reports the first conflicting roots in sorted order.
+func translateWorkspaceLabels(labels map[string]any, mapper *pathMapper) (map[string]any, bool, error) {
+	roots := make([]string, 0, len(labels))
+	for root := range labels {
+		roots = append(roots, root)
+	}
+	sort.Strings(roots)
+	updated := make(map[string]any, len(labels))
+	sources := make(map[string]string, len(labels))
+	changed := false
+	for _, root := range roots {
+		mapped := mapper.remap(root)
+		if previous, duplicate := sources[mapped]; duplicate {
+			// Returning unchanged here would silently discard unrelated successful path translations.
+			return nil, false, fmt.Errorf(
+				"workspace roots %q and %q map to the same label key %q",
+				previous,
+				root,
+				mapped,
+			)
+		}
+		sources[mapped], updated[mapped] = root, labels[root]
+		changed = changed || mapped != root
+	}
+	return updated, changed, nil
 }
 
 // translateJSON preserves original bytes when no structural path needs conversion.
@@ -83,7 +119,10 @@ func translateJSON(data []byte, mapper *pathMapper) ([]byte, error) {
 		// Invalid trailing input is not a second value; retain the decoder's syntax or truncation error.
 		return nil, fmt.Errorf("decode trailing metadata: %w", err)
 	}
-	mapped, changed := translateValue(value, mapper, false)
+	mapped, changed, err := translateValue(value, mapper, false)
+	if err != nil {
+		return nil, err
+	}
 	if !changed {
 		return data, nil
 	}
