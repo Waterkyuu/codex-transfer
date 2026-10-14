@@ -133,11 +133,11 @@ func TestSessionIndexRollback(t *testing.T) {
 	failedRead := errors.New("synthetic metadata failure")
 	files := []sessionFile{{id: "first"}, {id: "second"}}
 	// Failing the second metadata read verifies that the first INSERT never reaches persistent state.
-	err = registerSessionIndex(context.Background(), file, files, func(entry sessionFile) (map[string]any, error) {
+	err = registerSessionIndex(context.Background(), file, files, func(entry sessionFile) (*sessionIndexRecord, error) {
 		if entry.id == "second" {
 			return nil, failedRead
 		}
-		return map[string]any{"id": entry.id, "rollout_path": "/new/rollout"}, nil
+		return &sessionIndexRecord{id: entry.id, rolloutPath: "/new/rollout"}, nil
 	})
 	if !errors.Is(err, failedRead) {
 		t.Fatalf("metadata error not preserved: %v", err)
@@ -247,8 +247,8 @@ func TestSessionIndexUserEventNames(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if values["has_user_event"] != 1 || values["first_user_message"] != "First user message" ||
-				values["title"] != "First user message" || values["preview"] != "First user message" {
+			if !values.hasUserEvent || values.firstUserMessage != "First user message" ||
+				values.title != "First user message" || values.preview != "First user message" {
 				t.Fatalf("imported user message not indexed: %v", values)
 			}
 		})

@@ -25,7 +25,7 @@ func sessionEnumText(raw json.RawMessage, fallback string) string {
 }
 
 // readSessionIndex derives only new-thread fields from a rollout; no receiving row is reconstructed from history.
-func readSessionIndex(ctx context.Context, file, destination string, archived bool) (map[string]any, error) {
+func readSessionIndex(ctx context.Context, file, destination string, archived bool) (*sessionIndexRecord, error) {
 	meta, err := readSessionMetadata(ctx, file)
 	if err != nil {
 		return nil, err
@@ -42,18 +42,11 @@ func readSessionIndex(ctx context.Context, file, destination string, archived bo
 	if provider == "" {
 		provider = "openai"
 	}
-	values := map[string]any{
-		"id": meta.ID, "rollout_path": destination, "cwd": meta.CWD, "cli_version": meta.CLIVersion,
-		"created_at": created.Unix(), "created_at_ms": created.UnixMilli(),
-		"updated_at": info.ModTime().Unix(), "updated_at_ms": info.ModTime().UnixMilli(),
-		"recency_at": info.ModTime().Unix(), "recency_at_ms": info.ModTime().UnixMilli(),
-		"source": sessionEnumText(meta.Source, "cli"), "model_provider": provider,
-		"title": meta.ID, "preview": "", "first_user_message": "", "has_user_event": 0,
-		"sandbox_policy": `{"type":"read-only"}`, "approval_mode": "on-request", "tokens_used": 0,
-		"archived": 0, "archived_at": nil, "history_mode": "legacy", "model": nil, "reasoning_effort": nil,
-	}
-	if archived {
-		values["archived"], values["archived_at"] = 1, info.ModTime().Unix()
+	record := &sessionIndexRecord{
+		id: meta.ID, rolloutPath: destination, cwd: meta.CWD, cliVersion: meta.CLIVersion,
+		createdAt: created, updatedAt: info.ModTime(),
+		source: sessionEnumText(meta.Source, "cli"), modelProvider: provider,
+		title: meta.ID, sandboxPolicy: `{"type":"read-only"}`, approvalMode: "on-request", archived: archived,
 	}
 	reader, closeReader, err := openSessionReader(ctx, file)
 	if err != nil {
@@ -63,16 +56,16 @@ func readSessionIndex(ctx context.Context, file, destination string, archived bo
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64<<10), 16<<20)
 	for scanner.Scan() {
-		var record struct {
+		var envelope struct {
 			// Type selects structured context and user events without modifying their stored bytes.
 			Type string `json:"type"`
 			// Payload supplies metadata used only when inserting a new receiving thread row.
 			Payload json.RawMessage `json:"payload"`
 		}
-		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+		if err := json.Unmarshal(scanner.Bytes(), &envelope); err != nil {
 			return nil, err
 		}
-		if record.Type == "turn_context" {
+		if envelope.Type == "turn_context" {
 			var turn struct {
 				// CWD is the working directory recorded for the most recent turn.
 				CWD string `json:"cwd"`
@@ -85,49 +78,49 @@ func readSessionIndex(ctx context.Context, file, destination string, archived bo
 				// ApprovalPolicy retains the recorded approval enum or structured variant.
 				ApprovalPolicy json.RawMessage `json:"approval_policy"`
 			}
-			if err := json.Unmarshal(record.Payload, &turn); err != nil {
+			if err := json.Unmarshal(envelope.Payload, &turn); err != nil {
 				return nil, err
 			}
 			if turn.CWD != "" {
-				values["cwd"] = turn.CWD
+				record.cwd = turn.CWD
 			}
 			if turn.Model != "" {
-				values["model"] = turn.Model
+				record.model = &turn.Model
 			}
 			if turn.Effort != nil {
-				values["reasoning_effort"] = *turn.Effort
+				record.reasoningEffort = turn.Effort
 			}
 			if len(turn.SandboxPolicy) > 0 {
-				values["sandbox_policy"] = string(turn.SandboxPolicy)
+				record.sandboxPolicy = string(turn.SandboxPolicy)
 			}
-			values["approval_mode"] = sessionEnumText(turn.ApprovalPolicy, values["approval_mode"].(string))
+			record.approvalMode = sessionEnumText(turn.ApprovalPolicy, record.approvalMode)
 		}
-		if record.Type == "event_msg" {
+		if envelope.Type == "event_msg" {
 			var event struct {
 				// Type identifies user messages, excluding assistant and runtime events.
 				Type string `json:"type"`
 				// Message seeds a new thread's title and first-message search field.
 				Message string `json:"message"`
 			}
-			if err := json.Unmarshal(record.Payload, &event); err != nil {
+			if err := json.Unmarshal(envelope.Payload, &event); err != nil {
 				return nil, err
 			}
 			// Newer rollouts use user_message; both spellings must set the flag used by native conversation lists.
 			isUserMessage := event.Type == "user_msg" || event.Type == "user_message"
-			if isUserMessage && values["has_user_event"] == 0 {
-				values["has_user_event"], values["first_user_message"] = 1, event.Message
+			if isUserMessage && !record.hasUserEvent {
+				record.hasUserEvent, record.firstUserMessage = true, event.Message
 				title := []rune(strings.TrimSpace(event.Message))
 				if len(title) > 512 {
 					title = title[:512]
 				}
-				values["title"], values["preview"] = string(title), string(title)
+				record.title, record.preview = string(title), string(title)
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	return values, nil
+	return record, nil
 }
 
 // sessionIndexColumns validates the receiver schema against the fixed set of supplied new-thread fields.
@@ -173,7 +166,7 @@ func registerSessionIndex(
 	ctx context.Context,
 	file string,
 	files []sessionFile,
-	read func(sessionFile) (map[string]any, error),
+	read func(sessionFile) (*sessionIndexRecord, error),
 ) error {
 	if len(files) == 0 {
 		return ctx.Err()
@@ -205,7 +198,7 @@ func registerSessionIndex(
 	if err != nil {
 		return err
 	}
-	columns, err := sessionIndexColumns(ctx, db, first)
+	columns, err := sessionIndexColumns(ctx, db, first.columns())
 	if err != nil {
 		return err
 	}
@@ -215,7 +208,7 @@ func registerSessionIndex(
 		placeholders = append(placeholders, "?")
 	}
 	// Resetting discovery would replay existing histories and overwrite SQLite-only settings; insert new IDs only.
-	// #nosec G202 -- Columns are selected from readSessionIndex's fixed keys; all record values are parameters.
+	// #nosec G202 -- Columns are selected from sessionIndexRecord's fixed columns; all record values are parameters.
 	query := "INSERT INTO threads (" + strings.Join(quoted, ",") + ") VALUES (" +
 		strings.Join(placeholders, ",") + ") ON CONFLICT(id) DO NOTHING"
 	tx, err := db.BeginTx(ctx, nil)
@@ -236,15 +229,16 @@ func registerSessionIndex(
 				return fmt.Errorf("read new session %s: %w", entry.id, err)
 			}
 		}
-		if record["id"] != entry.id {
+		if record.id != entry.id {
 			return fmt.Errorf("session identity changed before registration: %s", entry.id)
 		}
+		values := record.columns()
 		arguments := make([]any, 0, len(columns))
 		for _, column := range columns {
-			arguments = append(arguments, record[column])
+			arguments = append(arguments, values[column])
 		}
 		if _, err := statement.ExecContext(ctx, arguments...); err != nil {
-			return fmt.Errorf("register session %s: %w", record["id"], err)
+			return fmt.Errorf("register session %s: %w", record.id, err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
