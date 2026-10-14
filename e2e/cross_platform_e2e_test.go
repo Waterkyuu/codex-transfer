@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
-	"crypto/tls"
 	"database/sql"
 	"encoding/binary"
 	"encoding/hex"
@@ -205,72 +204,17 @@ func TestCLICrossPlatformImport(t *testing.T) {
 			); err != nil {
 				t.Fatal(err)
 			}
-			reserved, err := net.Listen("tcp", "127.0.0.1:0")
-			if err != nil {
-				t.Fatal(err)
-			}
-			port := reserved.Addr().(*net.TCPAddr).Port
-			if err := reserved.Close(); err != nil {
-				t.Fatal(err)
-			}
 			receiver := exec.CommandContext(
 				ctx,
 				binary,
 				"receive",
-				"--listen",
-				"127.0.0.1",
-				"--port",
-				fmt.Sprint(port),
 				"--workers",
 				"2",
 				"--skip-process-check",
 			)
 			receiver.Env = fixtureEnvironment(home)
-			input, err := receiver.StdinPipe()
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer input.Close()
-			lines, output, err := startCaptured(receiver)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				if receiver.ProcessState == nil {
-					_ = receiver.Process.Kill()
-					_ = receiver.Wait()
-				}
-			})
-			waitForLine(t, lines, "Receiver listening at ")
-			fingerprint := strings.TrimPrefix(waitForLine(t, lines, "Certificate SHA-256: "), "Certificate SHA-256: ")
-			connection, err := tls.Dial("tcp", net.JoinHostPort("127.0.0.1", fmt.Sprint(port)), &tls.Config{
-				MinVersion: tls.VersionTLS13, InsecureSkipVerify: true,
-				VerifyConnection: func(state tls.ConnectionState) error {
-					hash := sha256.Sum256(state.PeerCertificates[0].Raw)
-					if hex.EncodeToString(hash[:]) != fingerprint {
-						return fmt.Errorf("receiver certificate does not match local output")
-					}
-					return nil
-				},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer connection.Close()
-			if err := connection.SetDeadline(time.Now().Add(45 * time.Second)); err != nil {
-				t.Fatal(err)
-			}
-			state := connection.ConnectionState()
-			code, err := state.ExportKeyingMaterial("codex-transfer-pairing-v1", nil, 6)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if actual := waitForLine(t, lines, "Pairing code: "); actual != "Pairing code: "+hex.EncodeToString(code) {
-				t.Fatal("TLS pairing mismatch")
-			}
-			if _, err := io.WriteString(input, hex.EncodeToString(code)+"\n"); err != nil {
-				t.Fatal(err)
-			}
+			peer := startReceiverPeer(t, receiver)
+			connection := peer.connection
 			sourceHome := "/home/source"
 			switch sourceOS {
 			case "darwin":
@@ -306,10 +250,7 @@ func TestCLICrossPlatformImport(t *testing.T) {
 				t.Fatal(err)
 			}
 			readPeerMessage(t, connection, "complete")
-			log := <-output
-			if err := receiver.Wait(); err != nil {
-				t.Fatalf("receiver: %v\n%s", err, log)
-			}
+			peer.wait(t)
 			assertCrossPlatformResult(t, home, sourceOS, canonical, encoded, encoding)
 		})
 	}

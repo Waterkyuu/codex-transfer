@@ -18,7 +18,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 	"time"
 )
@@ -203,62 +202,17 @@ func receiveNativeSessionArchive(t *testing.T, binary, home, archivePath string,
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	reserved, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := fmt.Sprint(reserved.Addr().(*net.TCPAddr).Port)
-	if err := reserved.Close(); err != nil {
-		t.Fatal(err)
-	}
-	receiver := exec.CommandContext(ctx, binary, "receive", "--listen", "127.0.0.1", "--port", port,
-		"--skip-process-check", "--sqlite-home", filepath.Join(home, ".codex", "sqlite"))
+	receiver := exec.CommandContext(
+		ctx,
+		binary,
+		"receive",
+		"--skip-process-check",
+		"--sqlite-home",
+		filepath.Join(home, ".codex", "sqlite"),
+	)
 	receiver.Env = isolatedCodexEnvironment(t, home)
-	input, err := receiver.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer input.Close()
-	lines, logs, err := startCaptured(receiver)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if receiver.ProcessState == nil {
-			_ = receiver.Process.Kill()
-			_ = receiver.Wait()
-		}
-	})
-	waitForLine(t, lines, "Receiver listening at ")
-	fingerprint := strings.TrimPrefix(waitForLine(t, lines, "Certificate SHA-256: "), "Certificate SHA-256: ")
-	connection, err := tls.Dial("tcp", net.JoinHostPort("127.0.0.1", port), &tls.Config{
-		MinVersion: tls.VersionTLS13, InsecureSkipVerify: true,
-		VerifyConnection: func(state tls.ConnectionState) error {
-			digest := sha256.Sum256(state.PeerCertificates[0].Raw)
-			if hex.EncodeToString(digest[:]) != fingerprint {
-				return fmt.Errorf("native receiver certificate does not match local output")
-			}
-			return nil
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer connection.Close()
-	if err := connection.SetDeadline(time.Now().Add(45 * time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	state := connection.ConnectionState()
-	code, err := state.ExportKeyingMaterial("codex-transfer-pairing-v1", nil, 6)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if actual := waitForLine(t, lines, "Pairing code: "); actual != "Pairing code: "+hex.EncodeToString(code) {
-		t.Fatal("native receiver pairing mismatch")
-	}
-	if _, err := io.WriteString(input, hex.EncodeToString(code)+"\n"); err != nil {
-		t.Fatal(err)
-	}
+	peer := startReceiverPeer(t, receiver)
+	connection := peer.connection
 	writePeerMessage(t, connection, offer)
 	readPeerMessage(t, connection, "ready")
 	archive, err := os.Open(archivePath)
@@ -270,10 +224,7 @@ func receiveNativeSessionArchive(t *testing.T, binary, home, archivePath string,
 		t.Fatal(err)
 	}
 	readPeerMessage(t, connection, "complete")
-	log := <-logs
-	if err := receiver.Wait(); err != nil {
-		t.Fatalf("native receiver failed: %v\n%s", err, log)
-	}
+	peer.wait(t)
 }
 
 // TestRealCodexCrossPlatformImport receives actual artifacts from the other operating systems and resumes their histories.
