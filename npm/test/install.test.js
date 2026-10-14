@@ -37,8 +37,9 @@ async function createArchive(directory, info, entries) {
   const archivePath = path.join(directory, info.assetName);
   await rm(archivePath, { force: true });
   if (process.platform === 'win32') {
+    // Windows PowerShell needs the core compression assembly for ZipArchiveMode as well as ZipFile's assembly.
     await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-      "$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; " +
+      "$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem; " +
       '$zip=[IO.Compression.ZipFile]::Open($env:FIXTURE_ARCHIVE, [IO.Compression.ZipArchiveMode]::Create); ' +
       'try { foreach ($item in (ConvertFrom-Json $env:FIXTURE_ENTRIES)) { ' +
       '$entry=$zip.CreateEntry($item.name); $writer=New-Object IO.StreamWriter($entry.Open()); ' +
