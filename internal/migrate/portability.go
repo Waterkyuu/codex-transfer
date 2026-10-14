@@ -12,16 +12,20 @@ import (
 	"sync"
 )
 
-// replaceStaged writes translated metadata beside the original and replaces only private staging files.
-func replaceStaged(file string, transform func(io.Reader, io.Writer) error) error {
+// replaceStaged publishes translated private staging metadata with the source modification time.
+func replaceStaged(file, destination string, transform func(io.Reader, io.Writer) error) error {
 	// #nosec G304 G122 -- These paths belong to validated private staging, never the live destination.
 	input, err := os.Open(file)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = input.Close() }()
+	info, err := input.Stat()
+	if err != nil {
+		return err
+	}
 	output, err := os.CreateTemp(filepath.Dir(file), ".translated-*")
 	if err != nil {
-		_ = input.Close()
 		return err
 	}
 	defer func() { _ = os.Remove(output.Name()) }()
@@ -29,7 +33,11 @@ func replaceStaged(file string, transform func(io.Reader, io.Writer) error) erro
 	if err != nil {
 		return err
 	}
-	return os.Rename(output.Name(), file)
+	// Fresh temporary files otherwise make old imported conversations appear newly active in the session index.
+	if err := os.Chtimes(output.Name(), info.ModTime(), info.ModTime()); err != nil {
+		return err
+	}
+	return os.Rename(output.Name(), destination)
 }
 
 // translateMetadata handles only Codex-owned config, session, global-state, and SQLite files.
@@ -41,7 +49,7 @@ func translateMetadata(ctx context.Context, file string, mapper *pathMapper) err
 	if strings.HasSuffix(base, ".jsonl.zst") {
 		return translateCompressedRollout(ctx, file, mapper)
 	}
-	return replaceStaged(file, func(input io.Reader, output io.Writer) error {
+	return replaceStaged(file, file, func(input io.Reader, output io.Writer) error {
 		input = contextReader{ctx: ctx, reader: input}
 		if strings.HasSuffix(base, ".jsonl") {
 			return translateRollouts(input, output, mapper)

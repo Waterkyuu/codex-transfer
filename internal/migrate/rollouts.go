@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/klauspost/compress/zstd"
@@ -129,31 +128,18 @@ func translateCompressedRollout(ctx context.Context, file string, mapper *pathMa
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	// #nosec G304 G122 -- The input is a verified regular entry in private staging.
-	input, err := os.Open(file)
-	if err != nil {
+	return replaceStaged(file, plain, func(input io.Reader, output io.Writer) error {
+		reader, err := zstd.NewReader(contextReader{ctx: ctx, reader: input},
+			zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(64<<20))
+		if err != nil {
+			return err
+		}
+		defer reader.Close()
+		bounded := &io.LimitedReader{R: reader, N: (1 << 30) + 1}
+		err = translateRollouts(bounded, output, mapper)
+		if err == nil && bounded.N == 0 {
+			err = errors.New("expanded rollout exceeds the 1 GiB conversion limit")
+		}
 		return err
-	}
-	defer func() { _ = input.Close() }()
-	reader, err := zstd.NewReader(contextReader{ctx: ctx, reader: input},
-		zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(64<<20))
-	if err != nil {
-		return err
-	}
-	defer reader.Close()
-	output, err := os.CreateTemp(filepath.Dir(file), ".rollout-*")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(output.Name()) }()
-	bounded := &io.LimitedReader{R: reader, N: (1 << 30) + 1}
-	err = translateRollouts(bounded, output, mapper)
-	if err == nil && bounded.N == 0 {
-		err = errors.New("expanded rollout exceeds the 1 GiB conversion limit")
-	}
-	err = errors.Join(err, output.Close())
-	if err != nil {
-		return err
-	}
-	return os.Rename(output.Name(), plain)
+	})
 }
