@@ -1,0 +1,225 @@
+package migrate
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// TestClearSessions removes selected histories and indexes while preserving unrelated state.
+func TestClearSessions(t *testing.T) {
+	for _, external := range []bool{false, true} {
+		t.Run(map[bool]string{false: "local", true: "external-sqlite"}[external], func(t *testing.T) {
+			home := t.TempDir()
+			selected := writeSessionFixture(t, home, "sessions/one.jsonl", "one", "2026-10-01T00:00:00Z", "/dev/app")
+			archived := writeSessionFixture(
+				t,
+				home,
+				"archived_sessions/one.jsonl.zst",
+				"one",
+				"2026-10-01T00:00:00Z",
+				"/dev/app",
+			)
+			retained := writeSessionFixture(t, home, "sessions/two.jsonl", "two", "2026-10-01T00:00:00Z", "/other/app")
+			sqliteHome := home
+			if external {
+				sqliteHome = t.TempDir()
+			}
+			usageDatabase(t, sqliteHome)
+			for name, data := range map[string]string{
+				"auth.json": "credentials", "config.toml": "# retained\n",
+				"history.jsonl":       "{\"session_id\":\"one\"}\r\n{\"session_id\":\"two\"}\r\n",
+				"session_index.jsonl": "{\"id\":\"one\"}\n{\"id\":\"two\"}",
+			} {
+				if err := os.WriteFile(filepath.Join(home, name), []byte(data), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			usage, err := ListSessions(context.Background(), home, sqliteHome)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ClearSessions(context.Background(), home, sqliteHome, usage[:2]); err != nil {
+				t.Fatal(err)
+			}
+			for _, file := range []string{selected, archived} {
+				if _, err := os.Stat(file); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("selected rollout retained: %s, %v", file, err)
+				}
+			}
+			if _, err := os.Stat(retained); err != nil {
+				t.Fatal(err)
+			}
+			for name, want := range map[string]string{
+				"auth.json": "credentials", "config.toml": "# retained\n",
+				"history.jsonl": "{\"session_id\":\"two\"}\r\n", "session_index.jsonl": "{\"id\":\"two\"}",
+			} {
+				data, err := os.ReadFile(filepath.Join(home, name))
+				if err != nil || string(data) != want {
+					t.Fatalf("%s: %q, %v", name, data, err)
+				}
+			}
+			db, err := sql.Open("sqlite3", filepath.Join(sqliteHome, "state_5.sqlite"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			for _, table := range []string{"threads", "thread_data"} {
+				var count int
+				if err := db.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 1 {
+					t.Fatalf("%s count = %d, %v", table, count, err)
+				}
+			}
+			for _, root := range []string{home, sqliteHome} {
+				backups, err := filepath.Glob(root + ".backup-*")
+				if err != nil || len(backups) != 0 {
+					t.Fatalf("deleted data left in backups: %v, %v", backups, err)
+				}
+			}
+		})
+	}
+}
+
+// TestClearSessionsRefusesChangedPlan preserves live data when confirmation no longer describes its state.
+func TestClearSessionsRefusesChangedPlan(t *testing.T) {
+	home := t.TempDir()
+	file := writeSessionFixture(t, home, "sessions/one.jsonl", "one", "2026-10-01T00:00:00Z", "/dev/app")
+	usage, err := ListSessions(context.Background(), home, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("changed\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ClearSessions(context.Background(), home, "", usage); err == nil {
+		t.Fatal("changed deletion plan accepted")
+	}
+	data, err := os.ReadFile(file)
+	if err != nil || string(data) != "changed\n" {
+		t.Fatalf("live data changed: %q, %v", data, err)
+	}
+}
+
+// TestClearSessionsRollsBack leaves histories and indexes intact when preparation fails or is cancelled.
+func TestClearSessionsRollsBack(t *testing.T) {
+	for _, scenario := range []string{"cancelled", "invalid-history", "foreign-key", "locked"} {
+		t.Run(scenario, func(t *testing.T) {
+			home := t.TempDir()
+			file := writeSessionFixture(t, home, "sessions/one.jsonl", "one", "2026-10-01T00:00:00Z", "/dev/app")
+			usageDatabase(t, home)
+			usage, err := ListSessions(context.Background(), home, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			switch scenario {
+			case "cancelled":
+				cancel()
+			case "invalid-history":
+				if err := os.WriteFile(filepath.Join(home, "history.jsonl"), []byte("invalid\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "locked":
+				if err := os.WriteFile(home+".transfer-lock", nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+				defer os.Remove(home + ".transfer-lock")
+			case "foreign-key":
+				db, err := sql.Open("sqlite3", filepath.Join(home, "state_5.sqlite"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, execErr := db.Exec(`CREATE TABLE restricted(thread_id TEXT REFERENCES threads(id));
+INSERT INTO restricted VALUES ('one');`)
+				if err := errors.Join(execErr, db.Close()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := ClearSessions(ctx, home, "", usage); err == nil {
+				t.Fatal("failed preparation committed deletion")
+			} else if scenario == "cancelled" && !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancellation lost: %v", err)
+			}
+			after, err := os.ReadFile(file)
+			if err != nil || string(before) != string(after) {
+				t.Fatalf("live history changed: %s, %v", after, err)
+			}
+			retained, err := ListSessions(context.Background(), home, "")
+			if err != nil || len(retained) != len(usage) {
+				t.Fatalf("live indexes changed: %+v, %v", retained, err)
+			}
+		})
+	}
+}
+
+// TestClearSessionsProtectsForkReferences rejects references from retained rollouts while allowing internal ones.
+func TestClearSessionsProtectsForkReferences(t *testing.T) {
+	for _, scenario := range []string{"retained-child", "archived-child", "reverted-rollout", "internal-reference", "delete-child"} {
+		t.Run(scenario, func(t *testing.T) {
+			home := t.TempDir()
+			parentID := "00000000-0000-0000-0000-000000000303"
+			rolloutID := parentID
+			if scenario == "reverted-rollout" {
+				rolloutID = "00000000-0000-0000-0000-000000000305"
+			}
+			parent := writeSessionFixture(t, home, "sessions/rollout-2026-10-01T00-00-00-"+rolloutID+".jsonl.zst",
+				parentID, "2026-10-01T00:00:00Z", "/dev/parent")
+			childDirectory := "sessions"
+			if scenario == "archived-child" {
+				childDirectory = "archived_sessions"
+			}
+			child := writeSessionFixture(
+				t,
+				home,
+				childDirectory+"/child.jsonl",
+				"child",
+				"2026-10-01T00:00:01Z",
+				"/dev/child",
+			)
+			data := fmt.Sprintf(
+				`{"type":"session_meta","payload":{"id":"child","cwd":"/dev/child","timestamp":"2026-10-01T00:00:01Z","history_mode":"paginated","history_base":{"thread_id":%q,"end_ordinal_exclusive":1,"end_byte_offset":100}}}`+"\n",
+				rolloutID,
+			)
+			if err := os.WriteFile(child, []byte(data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			usage, err := ListSessions(context.Background(), home, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			selected := []SessionUsage{}
+			for _, session := range usage {
+				if scenario == "internal-reference" || scenario == "delete-child" && session.ID == "child" ||
+					scenario != "delete-child" && session.ID == parentID {
+					selected = append(selected, session)
+				}
+			}
+			err = ClearSessions(context.Background(), home, "", selected)
+			refused := scenario != "internal-reference" && scenario != "delete-child"
+			if refused {
+				if err == nil || !strings.Contains(err.Error(), "forked history") {
+					t.Fatalf("referenced parent deletion = %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			for _, file := range []string{parent, child} {
+				_, statErr := os.Stat(file)
+				deleted := !refused && (scenario == "internal-reference" || file == child)
+				if deleted != errors.Is(statErr, os.ErrNotExist) {
+					t.Fatalf("unexpected rollout state for %s: %v", file, statErr)
+				}
+			}
+		})
+	}
+}
