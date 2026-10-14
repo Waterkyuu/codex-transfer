@@ -3,6 +3,7 @@ package migrate
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -29,6 +30,8 @@ type installItem struct {
 	backup string
 	// installed records whether the staged data reached its live path.
 	installed bool
+	// snapshot retains the live entries cloned for a selective session transaction.
+	snapshot map[string]fs.FileInfo
 	// lock holds exclusive migration ownership for the local target.
 	lock *os.File
 }

@@ -17,7 +17,8 @@ func cloneSessionTarget(ctx context.Context, item *installItem) (map[string]fs.F
 	}
 	destination := filepath.Join(item.slot, "data")
 	if _, err := os.Lstat(item.target); errors.Is(err, os.ErrNotExist) {
-		return map[string]fs.FileInfo{}, os.Mkdir(destination, 0700)
+		item.snapshot = map[string]fs.FileInfo{}
+		return item.snapshot, os.Mkdir(destination, 0700)
 	} else if err != nil {
 		return nil, err
 	}
@@ -80,6 +81,7 @@ func cloneSessionTarget(ctx context.Context, item *installItem) (map[string]fs.F
 			return nil, err
 		}
 	}
+	item.snapshot = before
 	return before, ctx.Err()
 }
 
@@ -149,4 +151,16 @@ func cloneSessionFile(ctx context.Context, source, target string, info fs.FileIn
 		return err
 	}
 	return os.Chtimes(target, info.ModTime(), info.ModTime())
+}
+
+// validateSessionTargets rechecks every cloned root before any root in the transaction is replaced.
+func (i *installation) validateSessionTargets(ctx context.Context) error {
+	for _, item := range i.items {
+		if item.snapshot != nil {
+			if err := validateSessionTarget(ctx, item.target, item.snapshot); err != nil {
+				return err
+			}
+		}
+	}
+	return ctx.Err()
 }
