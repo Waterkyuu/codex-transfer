@@ -96,6 +96,18 @@ func adaptInstallation(ctx context.Context, installation *installation, mapper *
 			}
 		}()
 	}
+	sqliteHome := mapper.statePaths["sqlite_home"]
+	if sqliteHome == "" {
+		for _, item := range installation.items {
+			if item.name == "codex" {
+				sqliteHome = item.target
+			}
+			if item.name == "sqlite" {
+				sqliteHome = item.target
+				break
+			}
+		}
+	}
 	databases := []string{}
 	for _, item := range installation.items {
 		if item.name != "codex" && item.name != "sqlite" {
@@ -110,16 +122,20 @@ func adaptInstallation(ctx context.Context, installation *installation, mapper *
 				if !entry.Type().IsRegular() {
 					return nil
 				}
+				relative, err := filepath.Rel(filepath.Join(item.slot, "data"), file)
+				if err != nil {
+					return err
+				}
 				base := entry.Name()
-				isConfig := base == "config.toml"
-				isGlobalState := base == ".codex-global-state.json"
-				isDatabase := strings.HasSuffix(base, ".sqlite")
+				isDatabase := ownedDatabaseName(base) &&
+					filepath.Dir(filepath.Join(item.target, relative)) == sqliteHome
+				portablePath := filepath.ToSlash(relative)
+				isRootMetadata := portablePath == "config.toml" || portablePath == ".codex-global-state.json"
 				isRollout := strings.HasSuffix(base, ".jsonl") || strings.HasSuffix(base, ".jsonl.zst")
-				portablePath := filepath.ToSlash(file)
-				inSessionDirectory := strings.Contains(portablePath, "/sessions/") ||
-					strings.Contains(portablePath, "/archived_sessions/")
-				// Rollout suffixes outside session directories must not select unrelated JSONL files.
-				selected := isConfig || isGlobalState || isDatabase || (isRollout && inSessionDirectory)
+				inSessionDirectory := strings.HasPrefix(portablePath, "sessions/") ||
+					strings.HasPrefix(portablePath, "archived_sessions/")
+				// Project and plugin trees may contain identical names; ownership follows root-relative locations.
+				selected := isDatabase || item.name == "codex" && (isRootMetadata || isRollout && inSessionDirectory)
 				if !selected {
 					return nil
 				}
@@ -128,10 +144,6 @@ func adaptInstallation(ctx context.Context, installation *installation, mapper *
 					return nil
 				}
 				if strings.HasSuffix(base, ".jsonl.zst") {
-					relative, err := filepath.Rel(filepath.Join(item.slot, "data"), file)
-					if err != nil {
-						return err
-					}
 					destination := filepath.Join(item.target, relative)
 					mapper.rollouts[destination] = strings.TrimSuffix(destination, ".zst")
 				}
@@ -167,4 +179,28 @@ func adaptInstallation(ctx context.Context, installation *installation, mapper *
 		}
 	}
 	return nil
+}
+
+// ownedDatabaseName recognizes Codex database families without interpreting arbitrary project SQLite files.
+func ownedDatabaseName(name string) bool {
+	if !strings.HasSuffix(name, ".sqlite") {
+		return false
+	}
+	stem := strings.TrimSuffix(name, ".sqlite")
+	for _, family := range []string{"state", "logs", "thread_history"} {
+		if stem == family {
+			return true
+		}
+		version, ok := strings.CutPrefix(stem, family+"_")
+		if !ok || version == "" {
+			continue
+		}
+		for _, char := range version {
+			if char < '0' || char > '9' {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
