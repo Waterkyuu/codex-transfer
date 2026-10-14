@@ -135,8 +135,12 @@ func adaptInstallation(ctx context.Context, installation *installation, mapper *
 					return err
 				}
 				base := entry.Name()
-				isDatabase := ownedDatabaseName(base) &&
-					filepath.Dir(filepath.Join(item.target, relative)) == sqliteHome
+				// Windows directory casing must not exclude databases owned by the configured SQLite home.
+				databaseDirectory, directoryErr := filepath.Rel(
+					sqliteHome,
+					filepath.Dir(filepath.Join(item.target, relative)),
+				)
+				isDatabase := ownedDatabaseName(base) && directoryErr == nil && databaseDirectory == "."
 				portablePath := filepath.ToSlash(relative)
 				isRootMetadata := portablePath == "config.toml" || portablePath == ".codex-global-state.json"
 				isRollout := strings.HasSuffix(base, ".jsonl") || strings.HasSuffix(base, ".jsonl.zst")

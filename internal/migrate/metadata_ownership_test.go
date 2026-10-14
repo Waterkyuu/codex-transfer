@@ -6,18 +6,22 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 // TestMetadataOwnership adapts only real root metadata and databases in the selected SQLite directory.
 func TestMetadataOwnership(t *testing.T) {
-	for _, location := range []string{"default", "internal", "external"} {
+	for _, location := range []string{"default", "internal", "internal_case", "external"} {
 		t.Run(location, func(t *testing.T) {
+			if location == "internal_case" && runtime.GOOS != "windows" {
+				t.Skip("case-insensitive lexical paths are specific to Windows")
+			}
 			destination := filepath.Join(t.TempDir(), "codex")
 			sqliteHome := destination
 			roots := []Root{{Name: "codex", Path: destination}}
-			if location == "internal" {
+			if location == "internal" || location == "internal_case" {
 				sqliteHome = filepath.Join(destination, "sqlite")
 			}
 			if location == "external" {
@@ -37,7 +41,7 @@ func TestMetadataOwnership(t *testing.T) {
 				t.Fatal(err)
 			}
 			dbStage := stage
-			if location == "internal" {
+			if location == "internal" || location == "internal_case" {
 				dbStage = filepath.Join(stage, "sqlite")
 			}
 			if location == "external" {
@@ -87,6 +91,10 @@ func TestMetadataOwnership(t *testing.T) {
 			mapper, err := newPathMapper("linux", map[string]string{"/source": destination})
 			if err != nil {
 				t.Fatal(err)
+			}
+			if location == "internal_case" {
+				// A configured Windows path may use different casing than the staged directory.
+				sqliteHome = filepath.Join(destination, "SQLite")
 			}
 			mapper.statePaths["sqlite_home"] = sqliteHome
 			if err := adaptInstallation(context.Background(), installation, mapper, 2); err != nil {
