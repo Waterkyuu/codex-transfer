@@ -1,7 +1,6 @@
 package migrate
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -11,8 +10,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-
-	"github.com/klauspost/compress/zstd"
 )
 
 // pathField identifies structural metadata values, excluding prompts, titles, and credential strings.
@@ -131,8 +128,7 @@ func translateJSON(data []byte, mapper *pathMapper) ([]byte, error) {
 
 // translateRollouts edits only session metadata and turn context, preserving message lines exactly.
 func translateRollouts(input io.Reader, output io.Writer, mapper *pathMapper) error {
-	scanner := bufio.NewScanner(input)
-	scanner.Buffer(make([]byte, 64<<10), 16<<20)
+	scanner := newRolloutScanner(input)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		var envelope struct {
@@ -168,8 +164,7 @@ func translateCompressedRollout(ctx context.Context, file string, mapper *pathMa
 		return err
 	}
 	return replaceStaged(file, plain, func(input io.Reader, output io.Writer) error {
-		reader, err := zstd.NewReader(contextReader{ctx: ctx, reader: input},
-			zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(64<<20))
+		reader, err := newRolloutDecoder(contextReader{ctx: ctx, reader: input})
 		if err != nil {
 			return err
 		}
