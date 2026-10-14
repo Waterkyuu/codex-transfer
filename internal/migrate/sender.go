@@ -146,6 +146,14 @@ func (s *Sender) Send(ctx context.Context, address string) error {
 			if err != nil {
 				return err
 			}
+			sqliteHome, err := effectiveSQLiteHome(root.Path, s.SQLiteHome, configured)
+			if err != nil {
+				return err
+			}
+			// Internal state travels inside the Codex root but still needs its effective selector persisted.
+			if sqliteHome != absolute || configured["sqlite_home"] != "" {
+				configured["sqlite_home"] = sqliteHome
+			}
 			for key, value := range configured {
 				statePaths[key], err = filepath.Abs(value)
 				if err != nil {
