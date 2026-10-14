@@ -51,8 +51,10 @@ func (a *application) run(ctx context.Context, args []string) error {
 		return nil
 	case "address":
 		return a.address(args[1:])
-	case "workspaces", "clear-sessions":
-		return a.workspaces(ctx, args[0], args[1:])
+	case "workspaces":
+		return a.workspaces(ctx, args[1:])
+	case "clear-sessions":
+		return a.clearSessions(ctx, args[1:])
 	case "quit-codex":
 		return a.quitCodex(ctx, args[1:])
 	case "paths", "check", "send", "receive":
