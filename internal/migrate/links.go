@@ -90,7 +90,8 @@ func (p *extractPolicy) materializeLink(link pendingLink, links []pendingLink, v
 		return fmt.Errorf("symbolic link would recursively copy itself: %q", link.relative)
 	}
 	for _, pending := range links {
-		if pending.path == source || within(source, pending.path) {
+		// A target such as z/file needs the pending directory alias z materialized first.
+		if within(source, pending.path) || within(pending.path, source) {
 			if err := p.materializeLink(pending, links, visiting); err != nil {
 				return err
 			}
